@@ -3,4 +3,5 @@ resolver = "2"
 members = [
     "crates/memory-core",
     "crates/memory-db",
+    "crates/memory-providers",
 ]
