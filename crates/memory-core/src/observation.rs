@@ -95,6 +95,8 @@ impl Observation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "db", derive(sqlx::Type))]
+#[cfg_attr(feature = "db", sqlx(type_name = "memory_scope", rename_all = "snake_case"))]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryScope {
     Session,
@@ -129,6 +131,8 @@ impl std::str::FromStr for MemoryScope {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "db", derive(sqlx::Type))]
+#[cfg_attr(feature = "db", sqlx(type_name = "memory_kind", rename_all = "snake_case"))]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryKind {
     Decision,
@@ -171,6 +175,8 @@ impl std::fmt::Display for MemoryKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "db", derive(sqlx::Type))]
+#[cfg_attr(feature = "db", sqlx(type_name = "memory_confidence", rename_all = "snake_case"))]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryConfidence {
     Low,
@@ -189,6 +195,8 @@ impl std::fmt::Display for MemoryConfidence {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "db", derive(sqlx::Type))]
+#[cfg_attr(feature = "db", sqlx(type_name = "memory_sensitivity", rename_all = "snake_case"))]
 #[serde(rename_all = "snake_case")]
 pub enum MemorySensitivity {
     Public,
@@ -209,6 +217,8 @@ impl std::fmt::Display for MemorySensitivity {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "db", derive(sqlx::Type))]
+#[cfg_attr(feature = "db", sqlx(type_name = "memory_status", rename_all = "snake_case"))]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryStatus {
     Active,

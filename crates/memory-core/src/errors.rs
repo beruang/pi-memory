@@ -26,6 +26,9 @@ pub enum MemoryError {
     #[error("consolidation provider error: {0}")]
     ConsolidationProvider(String),
 
+    #[error("database error: {0}")]
+    Database(String),
+
     #[error("authorization denied")]
     AuthorizationDenied,
 }
