@@ -1,0 +1,14 @@
+[package]
+name = "memory-tests"
+version = "0.1.0"
+edition = "2021"
+
+[dev-dependencies]
+memory-core = { path = "../memory-core" }
+memory-db = { path = "../memory-db" }
+memory-mcp = { path = "../memory-mcp" }
+memory-daemon = { path = "../memory-daemon" }
+memory-providers = { path = "../memory-providers" }
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }

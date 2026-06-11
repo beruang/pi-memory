@@ -8,4 +8,5 @@ members = [
     "crates/memory-daemon",
     "crates/memory-cli",
     "crates/memory-api",
+    "crates/memory-tests",
 ]
