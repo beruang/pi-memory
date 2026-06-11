@@ -5,4 +5,7 @@ members = [
     "crates/memory-db",
     "crates/memory-providers",
     "crates/memory-mcp",
+    "crates/memory-daemon",
+    "crates/memory-cli",
+    "crates/memory-api",
 ]
