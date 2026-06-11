@@ -1,0 +1,15 @@
+[package]
+name = "memory-mcp"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+memory-core = { path = "../memory-core" }
+memory-db = { path = "../memory-db" }
+memory-providers = { path = "../memory-providers" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+tracing = "0.1"
+async-trait = "0.1"
