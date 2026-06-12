@@ -53,9 +53,7 @@ enum Commands {
         project_id: Option<String>,
     },
     /// Display one memory item with provenance
-    Inspect {
-        observation_id: String,
-    },
+    Inspect { observation_id: String },
     /// Start the local memory review interface
     Ui {
         #[arg(long, default_value = "3000")]
@@ -77,15 +75,27 @@ async fn main() {
             commands::mcp().await;
         }
         Commands::Migrate { database_url } => {
-            commands::migrate(database_url).await;
+            commands::migrate_cmd(database_url).await;
         }
-        Commands::Search { query, scope, project_id, limit } => {
+        Commands::Search {
+            query,
+            scope,
+            project_id,
+            limit,
+        } => {
             commands::search(query, scope, project_id, limit).await;
         }
-        Commands::Recall { task, scope, project_id } => {
+        Commands::Recall {
+            task,
+            scope,
+            project_id,
+        } => {
             commands::recall(task, scope, project_id).await;
         }
-        Commands::Consolidate { session, project_id } => {
+        Commands::Consolidate {
+            session,
+            project_id,
+        } => {
             commands::consolidate(session, project_id).await;
         }
         Commands::Inspect { observation_id } => {

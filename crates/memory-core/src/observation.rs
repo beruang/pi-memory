@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use time::OffsetDateTime;
+use uuid::Uuid;
 
-use super::evidence::EvidenceRef;
 use super::errors::MemoryError;
+use super::evidence::EvidenceRef;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Observation {
@@ -96,7 +96,10 @@ impl Observation {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "db", derive(sqlx::Type))]
-#[cfg_attr(feature = "db", sqlx(type_name = "memory_scope", rename_all = "snake_case"))]
+#[cfg_attr(
+    feature = "db",
+    sqlx(type_name = "memory_scope", rename_all = "snake_case")
+)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryScope {
     Session,
@@ -132,7 +135,10 @@ impl std::str::FromStr for MemoryScope {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "db", derive(sqlx::Type))]
-#[cfg_attr(feature = "db", sqlx(type_name = "memory_kind", rename_all = "snake_case"))]
+#[cfg_attr(
+    feature = "db",
+    sqlx(type_name = "memory_kind", rename_all = "snake_case")
+)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryKind {
     Decision,
@@ -176,7 +182,10 @@ impl std::fmt::Display for MemoryKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[cfg_attr(feature = "db", derive(sqlx::Type))]
-#[cfg_attr(feature = "db", sqlx(type_name = "memory_confidence", rename_all = "snake_case"))]
+#[cfg_attr(
+    feature = "db",
+    sqlx(type_name = "memory_confidence", rename_all = "snake_case")
+)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryConfidence {
     Low,
@@ -196,7 +205,10 @@ impl std::fmt::Display for MemoryConfidence {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "db", derive(sqlx::Type))]
-#[cfg_attr(feature = "db", sqlx(type_name = "memory_sensitivity", rename_all = "snake_case"))]
+#[cfg_attr(
+    feature = "db",
+    sqlx(type_name = "memory_sensitivity", rename_all = "snake_case")
+)]
 #[serde(rename_all = "snake_case")]
 pub enum MemorySensitivity {
     Public,
@@ -218,7 +230,10 @@ impl std::fmt::Display for MemorySensitivity {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "db", derive(sqlx::Type))]
-#[cfg_attr(feature = "db", sqlx(type_name = "memory_status", rename_all = "snake_case"))]
+#[cfg_attr(
+    feature = "db",
+    sqlx(type_name = "memory_status", rename_all = "snake_case")
+)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryStatus {
     Active,
@@ -286,7 +301,10 @@ mod tests {
     #[test]
     fn test_kind_display() {
         assert_eq!(MemoryKind::FailedAttempt.to_string(), "failed_attempt");
-        assert_eq!(MemoryKind::ImplementationDetail.to_string(), "implementation_detail");
+        assert_eq!(
+            MemoryKind::ImplementationDetail.to_string(),
+            "implementation_detail"
+        );
     }
 
     #[test]

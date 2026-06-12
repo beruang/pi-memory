@@ -7,15 +7,22 @@ use super::observation::{MemorySensitivity, Observation};
 static SECRET_PATTERNS: LazyLock<Vec<(Regex, &str)>> = LazyLock::new(|| {
     vec![
         (
-            Regex::new(r#"(?i)(api[_-]?key|apikey|api_secret)\s*[:=]\s*['\x22]?[\w\-_]{20,}['\x22]?"#).unwrap(),
+            Regex::new(
+                r#"(?i)(api[_-]?key|apikey|api_secret)\s*[:=]\s*['\x22]?[\w\-_]{20,}['\x22]?"#,
+            )
+            .unwrap(),
             "API key pattern",
         ),
         (
-            Regex::new(r#"(?i)(access[_-]?token|auth[_-]?token)\s*[:=]\s*['\x22]?[\w\-_\.]{20,}['\x22]?"#).unwrap(),
+            Regex::new(
+                r#"(?i)(access[_-]?token|auth[_-]?token)\s*[:=]\s*['\x22]?[\w\-_\.]{20,}['\x22]?"#,
+            )
+            .unwrap(),
             "Access token pattern",
         ),
         (
-            Regex::new(r#"(?i)(password|passwd|pwd)\s*[:=]\s*['\x22]?[^\s'\x22]{4,}['\x22]?"#).unwrap(),
+            Regex::new(r#"(?i)(password|passwd|pwd)\s*[:=]\s*['\x22]?[^\s'\x22]{4,}['\x22]?"#)
+                .unwrap(),
             "Password pattern",
         ),
         (
@@ -31,7 +38,8 @@ static SECRET_PATTERNS: LazyLock<Vec<(Regex, &str)>> = LazyLock::new(|| {
             "Database connection string with credentials",
         ),
         (
-            Regex::new(r"(?i)(aws_access_key_id|aws_secret_access_key|session_token)\s*[:=]").unwrap(),
+            Regex::new(r"(?i)(aws_access_key_id|aws_secret_access_key|session_token)\s*[:=]")
+                .unwrap(),
             "AWS credential keys",
         ),
         (
@@ -186,7 +194,8 @@ mod tests {
 
     #[test]
     fn test_classify_secret() {
-        let sensitivity = classify_sensitivity("API_KEY=sk-abcdefghijklmnopqrstuvwxyz123456", false);
+        let sensitivity =
+            classify_sensitivity("API_KEY=sk-abcdefghijklmnopqrstuvwxyz123456", false);
         assert_eq!(sensitivity, MemorySensitivity::Secret);
     }
 

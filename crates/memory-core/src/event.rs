@@ -19,11 +19,7 @@ pub struct SessionEvent {
 }
 
 impl SessionEvent {
-    pub fn new(
-        session_id: String,
-        event_type: String,
-        payload: serde_json::Value,
-    ) -> Self {
+    pub fn new(session_id: String, event_type: String, payload: serde_json::Value) -> Self {
         Self {
             id: Uuid::new_v4(),
             session_id,

@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 
 use super::errors::MemoryError;
 use super::event::SessionEvent;
-use super::observation::{MemoryConfidence, MemoryKind, MemoryScope, MemorySensitivity, Observation};
+use super::observation::{
+    MemoryConfidence, MemoryKind, MemoryScope, MemorySensitivity, Observation,
+};
 
 #[async_trait]
 pub trait EmbeddingProvider: Send + Sync {

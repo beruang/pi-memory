@@ -82,10 +82,7 @@ impl EmbeddingsRepository {
             .collect())
     }
 
-    pub async fn delete_by_observation_id(
-        &self,
-        observation_id: Uuid,
-    ) -> Result<(), MemoryError> {
+    pub async fn delete_by_observation_id(&self, observation_id: Uuid) -> Result<(), MemoryError> {
         sqlx::query(r#"DELETE FROM observation_embeddings WHERE observation_id = $1"#)
             .bind(observation_id)
             .execute(&self.pool)

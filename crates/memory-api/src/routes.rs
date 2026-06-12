@@ -1,4 +1,4 @@
-use axum::{Router, routing::get, routing::post, routing::put, routing::delete};
+use axum::{routing::delete, routing::get, routing::post, routing::put, Router};
 
 use super::handlers;
 

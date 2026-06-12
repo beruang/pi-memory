@@ -1,4 +1,8 @@
-use axum::{Json, extract::{Path, Query}, http::StatusCode};
+use axum::{
+    extract::{Path, Query},
+    http::StatusCode,
+    Json,
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -50,16 +54,17 @@ pub struct CreateObservationRequest {
 pub async fn create_observation(
     Json(_body): Json<CreateObservationRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
-    Ok((StatusCode::CREATED, Json(serde_json::json!({
-        "id": Uuid::new_v4().to_string(),
-        "status": "created",
-        "message": "Connect to PostgreSQL to enable observation creation."
-    }))))
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "id": Uuid::new_v4().to_string(),
+            "status": "created",
+            "message": "Connect to PostgreSQL to enable observation creation."
+        })),
+    ))
 }
 
-pub async fn get_observation(
-    Path(id): Path<Uuid>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+pub async fn get_observation(Path(id): Path<Uuid>) -> Result<Json<serde_json::Value>, StatusCode> {
     Ok(Json(serde_json::json!({
         "id": id.to_string(),
         "message": "Connect to PostgreSQL to enable observation retrieval."
@@ -77,9 +82,7 @@ pub async fn update_observation(
     })))
 }
 
-pub async fn delete_observation(
-    Path(id): Path<Uuid>,
-) -> Result<StatusCode, StatusCode> {
+pub async fn delete_observation(Path(_id): Path<Uuid>) -> Result<StatusCode, StatusCode> {
     Ok(StatusCode::NO_CONTENT)
 }
 

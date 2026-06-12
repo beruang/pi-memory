@@ -32,7 +32,8 @@ fn test_tool_schemas_have_required_fields() {
                 assert!(
                     schema["properties"].get(field_name).is_some(),
                     "Required field '{}' missing from properties for tool '{}'",
-                    field_name, tool.name
+                    field_name,
+                    tool.name
                 );
             }
         }
@@ -55,7 +56,9 @@ fn test_initialize_result_shape() {
     let json = serde_json::to_value(&result).unwrap();
     assert_eq!(json["protocol_version"], "2024-11-05");
     assert_eq!(json["server_info"]["name"], "agent-memory");
-    assert!(json["capabilities"]["tools"]["list_changed"].as_bool().unwrap());
+    assert!(json["capabilities"]["tools"]["list_changed"]
+        .as_bool()
+        .unwrap());
 }
 
 #[test]

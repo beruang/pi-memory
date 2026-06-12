@@ -56,7 +56,8 @@ impl Default for TokenBudget {
 impl TokenBudget {
     pub fn for_task(task: &str) -> usize {
         let task_lower = task.to_lowercase();
-        if task_lower.contains("debug") || task_lower.contains("bug") || task_lower.contains("fix") {
+        if task_lower.contains("debug") || task_lower.contains("bug") || task_lower.contains("fix")
+        {
             1500
         } else if task_lower.contains("architect") || task_lower.contains("design") {
             1800
@@ -81,7 +82,10 @@ mod tests {
 
     #[test]
     fn test_token_budget_for_debug_task() {
-        assert_eq!(TokenBudget::for_task("debug failed auth middleware tests"), 1500);
+        assert_eq!(
+            TokenBudget::for_task("debug failed auth middleware tests"),
+            1500
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
+pub mod schemas;
 pub mod server;
 pub mod tools;
-pub mod schemas;
 pub mod transport;
 
 pub use server::*;

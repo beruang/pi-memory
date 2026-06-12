@@ -51,16 +51,19 @@ fn handle_initialize(req: &JsonRpcRequest) -> JsonRpcResponse {
     JsonRpcResponse {
         jsonrpc: "2.0".into(),
         id: req.id.clone(),
-        result: Some(serde_json::to_value(InitializeResult {
-            protocol_version: "2024-11-05".into(),
-            capabilities: ServerCapabilities {
-                tools: ToolCapability { list_changed: true },
-            },
-            server_info: ServerInfo {
-                name: "agent-memory".into(),
-                version: "0.1.0".into(),
-            },
-        }).unwrap()),
+        result: Some(
+            serde_json::to_value(InitializeResult {
+                protocol_version: "2024-11-05".into(),
+                capabilities: ServerCapabilities {
+                    tools: ToolCapability { list_changed: true },
+                },
+                server_info: ServerInfo {
+                    name: "agent-memory".into(),
+                    version: "0.1.0".into(),
+                },
+            })
+            .unwrap(),
+        ),
         error: None,
     }
 }
@@ -90,28 +93,38 @@ async fn handle_tools_call(req: &JsonRpcRequest, server: &MemoryMcpServer) -> Js
         }
     };
 
-    let arguments = params.get("arguments").cloned().unwrap_or(Value::Object(serde_json::Map::new()));
+    let arguments = params
+        .get("arguments")
+        .cloned()
+        .unwrap_or(Value::Object(serde_json::Map::new()));
 
     match server.handle_tool_call(&tool_name, arguments).await {
-        Ok(result) => {
-            JsonRpcResponse {
-                jsonrpc: "2.0".into(),
-                id: req.id.clone(),
-                result: Some(serde_json::json!({
-                    "content": [{
-                        "type": "text",
-                        "text": serde_json::to_string(&result).unwrap_or_default(),
-                    }]
-                })),
-                error: None,
-            }
-        }
+        Ok(result) => JsonRpcResponse {
+            jsonrpc: "2.0".into(),
+            id: req.id.clone(),
+            result: Some(serde_json::json!({
+                "content": [{
+                    "type": "text",
+                    "text": serde_json::to_string(&result).unwrap_or_default(),
+                }]
+            })),
+            error: None,
+        },
         Err(e) => {
             let message = match &e {
-                memory_core::MemoryError::SecretContentRejected => "Content rejected: potential secret detected.".into(),
-                memory_core::MemoryError::ObservationNotFound(id) => format!("Observation not found: {}", id),
+                memory_core::MemoryError::SecretContentRejected => {
+                    "Content rejected: potential secret detected.".into()
+                }
+                memory_core::MemoryError::ObservationNotFound(id) => {
+                    format!("Observation not found: {}", id)
+                }
                 memory_core::MemoryError::InvalidScope => "Invalid scope.".into(),
-                memory_core::MemoryError::MissingEvidence => "Evidence is required for durable memory.".into(),
+                memory_core::MemoryError::MissingEvidence => {
+                    "Evidence is required for durable memory.".into()
+                }
+                memory_core::MemoryError::InvalidStatusTransition { from, to } => {
+                    format!("Invalid status transition from {} to {}", from, to)
+                }
                 _ => format!("Internal error: {}", e),
             };
             make_error_response(req.id.clone(), -32000, &message, None)
@@ -119,7 +132,12 @@ async fn handle_tools_call(req: &JsonRpcRequest, server: &MemoryMcpServer) -> Js
     }
 }
 
-fn make_error_response(id: Option<Value>, code: i32, message: &str, data: Option<Value>) -> JsonRpcResponse {
+fn make_error_response(
+    id: Option<Value>,
+    code: i32,
+    message: &str,
+    data: Option<Value>,
+) -> JsonRpcResponse {
     JsonRpcResponse {
         jsonrpc: "2.0".into(),
         id,
@@ -165,7 +183,12 @@ mod tests {
 
     #[test]
     fn test_error_response_for_unknown_method() {
-        let resp = make_error_response(Some(Value::Number(1.into())), -32601, "Method not found", None);
+        let resp = make_error_response(
+            Some(Value::Number(1.into())),
+            -32601,
+            "Method not found",
+            None,
+        );
         assert!(resp.result.is_none());
         assert_eq!(resp.error.as_ref().unwrap().code, -32601);
     }

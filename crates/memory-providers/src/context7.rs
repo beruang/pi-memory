@@ -1,8 +1,9 @@
-use serde::{Deserialize, Serialize};
 use memory_core::MemoryError;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
 pub struct Context7Client {
+    #[allow(dead_code)]
     client: reqwest::Client,
 }
 
@@ -21,7 +22,11 @@ impl Context7Client {
     }
 
     /// Look up documentation for a library. Returns relevant snippets.
-    pub async fn lookup(&self, library: &str, query: &str) -> Result<Vec<Context7Result>, MemoryError> {
+    pub async fn lookup(
+        &self,
+        library: &str,
+        query: &str,
+    ) -> Result<Vec<Context7Result>, MemoryError> {
         // Context7 integration — resolve library ID and query docs
         // This is a thin wrapper; actual integration depends on Context7 MCP/API availability
         let _ = (library, query);

@@ -1,3 +1,5 @@
+#[cfg(feature = "openai")]
+use crate::ProviderConfig;
 use async_trait::async_trait;
 use memory_core::{EmbeddingProvider, MemoryError};
 
@@ -18,14 +20,16 @@ impl Default for MockEmbeddingProvider {
 #[async_trait]
 impl EmbeddingProvider for MockEmbeddingProvider {
     async fn embed(&self, input: &str) -> Result<Vec<f32>, MemoryError> {
-        // Deterministic mock: hash-like behavior from input length
-        let len = input.len().min(128);
-        let mut vec = Vec::with_capacity(len);
-        for (i, byte) in input.bytes().take(len).enumerate() {
-            vec.push((byte as f32) / 255.0 + (i as f32 * 0.01));
+        // Deterministic mock: hash-like behavior from input content
+        // Produces 1536-dim vectors to match pgvector schema
+        const DIM: usize = 1536;
+        let mut vec = Vec::with_capacity(DIM);
+        let bytes: Vec<u8> = input.as_bytes().to_vec();
+        for i in 0..DIM {
+            let byte = bytes.get(i % bytes.len()).copied().unwrap_or(0);
+            let val = (byte as f32) / 255.0 + ((i % 16) as f32 * 0.01);
+            vec.push(val);
         }
-        // Pad or truncate to fixed dimension
-        vec.resize(128, 0.0);
         Ok(vec)
     }
 }
@@ -95,7 +99,10 @@ pub struct OllamaEmbeddingProvider {
 impl OllamaEmbeddingProvider {
     pub fn new(config: &ProviderConfig) -> Result<Self, MemoryError> {
         Ok(Self {
-            base_url: config.base_url.clone().unwrap_or_else(|| "http://localhost:11434".into()),
+            base_url: config
+                .base_url
+                .clone()
+                .unwrap_or_else(|| "http://localhost:11434".into()),
             model: config.model.clone(),
             client: reqwest::Client::new(),
         })
@@ -139,7 +146,7 @@ mod tests {
     async fn test_mock_embedding_provider() {
         let provider = MockEmbeddingProvider::new();
         let result = provider.embed("test input").await.unwrap();
-        assert_eq!(result.len(), 128);
+        assert_eq!(result.len(), 1536);
         assert!(result.iter().any(|&v| v != 0.0));
     }
 

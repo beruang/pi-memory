@@ -37,21 +37,17 @@ impl EvidenceRepository {
         &self,
         observation_id: Uuid,
     ) -> Result<Vec<EvidenceRef>, MemoryError> {
-        let rows = sqlx::query(
-            r#"SELECT * FROM evidence WHERE observation_id = $1 ORDER BY created_at"#,
-        )
-        .bind(observation_id)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        let rows =
+            sqlx::query(r#"SELECT * FROM evidence WHERE observation_id = $1 ORDER BY created_at"#)
+                .bind(observation_id)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| MemoryError::Database(e.to_string()))?;
 
-        Ok(rows.iter().map(|r| row_to_evidence(r)).collect())
+        Ok(rows.iter().map(row_to_evidence).collect())
     }
 
-    pub async fn delete_by_observation_id(
-        &self,
-        observation_id: Uuid,
-    ) -> Result<(), MemoryError> {
+    pub async fn delete_by_observation_id(&self, observation_id: Uuid) -> Result<(), MemoryError> {
         sqlx::query(r#"DELETE FROM evidence WHERE observation_id = $1"#)
             .bind(observation_id)
             .execute(&self.pool)

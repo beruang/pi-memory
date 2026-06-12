@@ -13,12 +13,12 @@ pub struct ScoreWeights {
 impl Default for ScoreWeights {
     fn default() -> Self {
         Self {
-            semantic: 0.45,
-            keyword: 0.30,
+            semantic: 0.40,
+            keyword: 0.25,
             confidence: 0.10,
             recency: 0.05,
             evidence: 0.05,
-            file_or_entity_match: 0.05,
+            file_or_entity_match: 0.15,
         }
     }
 }
@@ -49,6 +49,7 @@ pub struct ScoredObservation {
     pub text_score: f64,
     pub confidence_score: f64,
     pub recency_score: f64,
+    pub file_or_entity_match_score: f64,
     pub final_score: f64,
 }
 
@@ -65,23 +66,41 @@ pub fn recency_decay(age_days: f64) -> f64 {
     (1.0 / (1.0 + age_days / 30.0)).min(1.0)
 }
 
+pub fn status_penalty(status: &str) -> f64 {
+    match status {
+        "conflicted" => 0.15,
+        "obsolete" => 0.10,
+        "superseded" => 0.05,
+        _ => 0.0,
+    }
+}
+
+/// Compute the final score for an observation.
+/// Takes raw scores, metadata, weights, and applies file/entity bonus + status penalties.
+#[allow(clippy::too_many_arguments)]
 pub fn compute_final_score(
     vector_score: f64,
     text_score: f64,
     confidence_str: &str,
     age_days: f64,
     evidence_count: usize,
+    file_or_entity_match_score: f64,
+    status: &str,
     weights: &ScoreWeights,
 ) -> f64 {
     let confidence_score = confidence_to_score(confidence_str);
     let recency_score = recency_decay(age_days);
     let evidence_score = (evidence_count as f64).min(5.0) / 5.0;
+    let penalty = status_penalty(status);
 
-    vector_score * weights.semantic
+    let base = vector_score * weights.semantic
         + text_score * weights.keyword
         + confidence_score * weights.confidence
         + recency_score * weights.recency
         + evidence_score * weights.evidence
+        + file_or_entity_match_score * weights.file_or_entity_match;
+
+    (base - penalty).clamp(0.0, 1.0)
 }
 
 #[cfg(test)]
@@ -112,15 +131,34 @@ mod tests {
     #[test]
     fn test_compute_final_score_range() {
         let weights = ScoreWeights::default();
-        let score = compute_final_score(0.8, 0.6, "high", 10.0, 3, &weights);
+        let score = compute_final_score(0.8, 0.6, "high", 10.0, 3, 0.1, "active", &weights);
         assert!(score >= 0.0);
         assert!(score <= 1.0);
     }
 
     #[test]
+    fn test_conflict_penalty() {
+        let weights = ScoreWeights::default();
+        let active_score = compute_final_score(0.8, 0.6, "high", 10.0, 3, 0.1, "active", &weights);
+        let conflicted_score =
+            compute_final_score(0.8, 0.6, "high", 10.0, 3, 0.1, "conflicted", &weights);
+        assert!(conflicted_score < active_score);
+    }
+
+    #[test]
+    fn test_file_entity_match_bonus() {
+        let weights = ScoreWeights::default();
+        let no_match = compute_final_score(0.8, 0.6, "high", 10.0, 3, 0.0, "active", &weights);
+        let with_match = compute_final_score(0.8, 0.6, "high", 10.0, 3, 1.0, "active", &weights);
+        assert!(with_match > no_match);
+    }
+
+    #[test]
     fn test_invalid_weights_rejected() {
-        let mut weights = ScoreWeights::default();
-        weights.semantic = 0.9;
+        let weights = ScoreWeights {
+            semantic: 0.9,
+            ..Default::default()
+        };
         assert!(weights.validate().is_err());
     }
 }

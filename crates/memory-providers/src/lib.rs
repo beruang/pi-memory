@@ -1,6 +1,6 @@
-pub mod embeddings;
 pub mod consolidation;
 pub mod context7;
+pub mod embeddings;
 
 use memory_core::{ConsolidationProvider, EmbeddingProvider, MemoryError};
 
@@ -18,10 +18,16 @@ pub fn create_embedding_provider(
 ) -> Result<Box<dyn EmbeddingProvider>, MemoryError> {
     match kind {
         #[cfg(feature = "openai")]
-        "openai" => Ok(Box::new(embeddings::OpenAiEmbeddingProvider::new(config)?)),
+        "openai" => {
+            let config = _config;
+            Ok(Box::new(embeddings::OpenAiEmbeddingProvider::new(config)?))
+        }
         #[cfg(feature = "ollama")]
-        "ollama" => Ok(Box::new(embeddings::OllamaEmbeddingProvider::new(config)?)),
-        "mock" | _ => Ok(Box::new(embeddings::MockEmbeddingProvider::new())),
+        "ollama" => {
+            let config = _config;
+            Ok(Box::new(embeddings::OllamaEmbeddingProvider::new(config)?))
+        }
+        _ => Ok(Box::new(embeddings::MockEmbeddingProvider::new())),
     }
 }
 
@@ -31,7 +37,12 @@ pub fn create_consolidation_provider(
 ) -> Result<Box<dyn ConsolidationProvider>, MemoryError> {
     match kind {
         #[cfg(feature = "anthropic")]
-        "anthropic" => Ok(Box::new(consolidation::AnthropicConsolidationProvider::new(config)?)),
-        "mock" | _ => Ok(Box::new(consolidation::MockConsolidationProvider::new())),
+        "anthropic" => {
+            let config = _config;
+            Ok(Box::new(
+                consolidation::AnthropicConsolidationProvider::new(config)?,
+            ))
+        }
+        _ => Ok(Box::new(consolidation::MockConsolidationProvider::new())),
     }
 }

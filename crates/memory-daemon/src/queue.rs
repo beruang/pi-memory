@@ -66,6 +66,10 @@ impl JobQueue {
         self.queue.lock().await.len()
     }
 
+    pub async fn is_empty(&self) -> bool {
+        self.queue.lock().await.is_empty()
+    }
+
     pub async fn dead_letter_count(&self) -> usize {
         self.dead_letter.lock().await.len()
     }

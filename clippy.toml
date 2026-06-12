@@ -1,0 +1,6 @@
+# Clippy configuration for pi-memory workspace
+# Run with: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+# Thresholds
+too-many-arguments-threshold = 10
+cognitive-complexity-threshold = 30

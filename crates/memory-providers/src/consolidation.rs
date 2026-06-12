@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use memory_core::{
-    CandidateObservation, ConsolidationInput, ConsolidationProvider, MemoryConfidence,
-    MemoryKind, MemoryScope, MemorySensitivity, MemoryError,
+    CandidateObservation, ConsolidationInput, ConsolidationProvider, MemoryConfidence, MemoryError,
+    MemoryKind, MemoryScope, MemorySensitivity,
 };
 
 #[cfg(feature = "anthropic")]
@@ -38,7 +38,10 @@ impl ConsolidationProvider for MockConsolidationProvider {
                             candidates.push(CandidateObservation {
                                 scope: MemoryScope::Project,
                                 kind: MemoryKind::Fact,
-                                summary: format!("Captured from session: {}...", &text[..50.min(text.len())]),
+                                summary: format!(
+                                    "Captured from session: {}...",
+                                    &text[..50.min(text.len())]
+                                ),
                                 confidence: MemoryConfidence::Low,
                                 sensitivity: MemorySensitivity::Internal,
                                 entities: vec![],
@@ -72,7 +75,9 @@ impl AnthropicConsolidationProvider {
             .api_key
             .clone()
             .or_else(|| std::env::var("ANTHROPIC_API_KEY").ok())
-            .ok_or_else(|| MemoryError::ConsolidationProvider("ANTHROPIC_API_KEY not set".into()))?;
+            .ok_or_else(|| {
+                MemoryError::ConsolidationProvider("ANTHROPIC_API_KEY not set".into())
+            })?;
 
         Ok(Self {
             api_key,
@@ -115,9 +120,7 @@ impl ConsolidationProvider for AnthropicConsolidationProvider {
             .map_err(|e| MemoryError::ConsolidationProvider(e.to_string()))?;
 
         // Parse the response - this is simplified; real impl would parse structured output
-        let _text = response["content"][0]["text"]
-            .as_str()
-            .unwrap_or("[]");
+        let _text = response["content"][0]["text"].as_str().unwrap_or("[]");
 
         Ok(vec![])
     }

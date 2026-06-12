@@ -34,12 +34,8 @@ async fn test_observation_with_evidence() {
     )
     .unwrap();
 
-    let evidence = EvidenceRef::new(
-        obs.id,
-        EvidenceSourceType::Message,
-        "msg-1".into(),
-    )
-    .with_excerpt("Let's set worker concurrency to 1 during migration jobs.".into());
+    let evidence = EvidenceRef::new(obs.id, EvidenceSourceType::Message, "msg-1".into())
+        .with_excerpt("Let's set worker concurrency to 1 during migration jobs.".into());
 
     obs.evidence.push(evidence);
     assert_eq!(obs.evidence.len(), 1);
@@ -51,7 +47,7 @@ async fn test_observation_with_evidence() {
 
 #[tokio::test]
 async fn test_privacy_pipeline() {
-    use memory_core::privacy::{scan_for_secrets, strip_private_blocks, classify_sensitivity};
+    use memory_core::privacy::{classify_sensitivity, scan_for_secrets, strip_private_blocks};
 
     // Secret detection
     let with_secret = "API_KEY=sk-abcdefghijklmnopqrstuvwxyz123456";
@@ -88,7 +84,8 @@ async fn test_conflict_detection_flow() {
         "Project upgraded to Node 22".into(),
         MemoryConfidence::High,
         MemorySensitivity::Internal,
-    ).unwrap();
+    )
+    .unwrap();
 
     let mut existing = Observation::new(
         MemoryScope::Project,
@@ -97,7 +94,8 @@ async fn test_conflict_detection_flow() {
         "Project downgraded to Node 20".into(),
         MemoryConfidence::High,
         MemorySensitivity::Internal,
-    ).unwrap();
+    )
+    .unwrap();
     existing.entities = vec!["node".into(), "runtime".into()];
     let mut new_with_entities = new.clone();
     new_with_entities.entities = vec!["node".into(), "runtime".into()];
@@ -115,7 +113,8 @@ async fn test_supersession_flow() {
         "Project uses Node 20".into(),
         MemoryConfidence::High,
         MemorySensitivity::Internal,
-    ).unwrap();
+    )
+    .unwrap();
 
     let new = Observation::new(
         MemoryScope::Project,
@@ -124,7 +123,8 @@ async fn test_supersession_flow() {
         "Project upgraded to Node 22".into(),
         MemoryConfidence::High,
         MemorySensitivity::Internal,
-    ).unwrap();
+    )
+    .unwrap();
 
     old.status = MemoryStatus::Superseded;
     old.superseded_by = Some(new.id);
@@ -143,7 +143,7 @@ async fn test_provider_mock_roundtrip() {
     };
     let emb_provider = create_embedding_provider("mock", &emb_config).unwrap();
     let embedding = emb_provider.embed("test memory text").await.unwrap();
-    assert_eq!(embedding.len(), 128);
+    assert_eq!(embedding.len(), 1536);
     assert!(embedding.iter().any(|&v| v != 0.0));
 
     let con_config = ProviderConfig {

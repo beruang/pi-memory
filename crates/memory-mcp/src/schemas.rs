@@ -85,7 +85,8 @@ pub fn all_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "memory.search".into(),
-            description: "Hybrid memory search combining vector, keyword, and structured filters.".into(),
+            description: "Hybrid memory search combining vector, keyword, and structured filters."
+                .into(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {

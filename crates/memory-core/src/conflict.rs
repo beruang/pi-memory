@@ -188,7 +188,7 @@ fn shared_files<'a>(a: &'a Observation, b: &'a Observation) -> Vec<&'a String> {
     a.files.iter().filter(|f| b.files.contains(*f)).collect()
 }
 
-fn summaries_contradict(new_summary: &str, existing_summary: &str) -> bool {
+pub fn summaries_contradict(new_summary: &str, existing_summary: &str) -> bool {
     let new_lower = new_summary.to_lowercase();
     let existing_lower = existing_summary.to_lowercase();
 
@@ -248,7 +248,12 @@ mod tests {
 
     #[test]
     fn test_no_conflict_on_different_kinds() {
-        let new = make_obs(MemoryKind::Fact, "Project uses PostgreSQL", vec!["db"], vec![]);
+        let new = make_obs(
+            MemoryKind::Fact,
+            "Project uses PostgreSQL",
+            vec!["db"],
+            vec![],
+        );
         let existing = make_obs(MemoryKind::Decision, "Use PostgreSQL", vec!["db"], vec![]);
         let conflicts = detect_conflicts(&new, &[existing]);
         assert!(conflicts.is_empty());

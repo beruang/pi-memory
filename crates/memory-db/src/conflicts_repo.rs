@@ -79,7 +79,7 @@ impl ConflictsRepository {
             .map_err(|e| MemoryError::Database(e.to_string()))?
         };
 
-        Ok(rows.iter().map(|r| row_to_conflict(r)).collect())
+        Ok(rows.iter().map(row_to_conflict).collect())
     }
 
     pub async fn resolve_conflict(

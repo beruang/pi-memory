@@ -14,11 +14,7 @@ pub struct EvidenceRef {
 }
 
 impl EvidenceRef {
-    pub fn new(
-        observation_id: Uuid,
-        source_type: EvidenceSourceType,
-        source_id: String,
-    ) -> Self {
+    pub fn new(observation_id: Uuid, source_type: EvidenceSourceType, source_id: String) -> Self {
         Self {
             id: Uuid::new_v4(),
             observation_id,
@@ -87,8 +83,14 @@ mod tests {
         assert_eq!(ev.observation_id, obs_id);
         assert_eq!(ev.source_type, EvidenceSourceType::Message);
         assert_eq!(ev.source_id, "msg-1");
-        assert_eq!(ev.excerpt.as_deref(), Some("Let's use advisory locks here."));
-        assert_eq!(ev.source_location.as_deref(), Some("session-1/messages/msg-1"));
+        assert_eq!(
+            ev.excerpt.as_deref(),
+            Some("Let's use advisory locks here.")
+        );
+        assert_eq!(
+            ev.source_location.as_deref(),
+            Some("session-1/messages/msg-1")
+        );
     }
 
     #[test]
