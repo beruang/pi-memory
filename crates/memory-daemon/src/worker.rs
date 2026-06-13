@@ -1,4 +1,7 @@
-use memory_core::MemoryError;
+use memory_db::{
+    AuditRepository, ConflictsRepository, EmbeddingsRepository, EventsRepository,
+    EvidenceRepository, ObservationsRepository,
+};
 use memory_providers::{create_consolidation_provider, create_embedding_provider, ProviderConfig};
 use sqlx::PgPool;
 use sqlx::Row;
@@ -8,11 +11,24 @@ use super::queue::{Job, JobQueue, JobType};
 
 pub struct ConsolidationWorker {
     queue: std::sync::Arc<JobQueue>,
+    pool: PgPool,
+    provider_type: String,
+    provider_config: ProviderConfig,
 }
 
 impl ConsolidationWorker {
-    pub fn new(queue: std::sync::Arc<JobQueue>) -> Self {
-        Self { queue }
+    pub fn new(
+        queue: std::sync::Arc<JobQueue>,
+        pool: PgPool,
+        provider_type: String,
+        provider_config: ProviderConfig,
+    ) -> Self {
+        Self {
+            queue,
+            pool,
+            provider_type,
+            provider_config,
+        }
     }
 
     pub async fn run(&self) {
@@ -38,41 +54,161 @@ impl ConsolidationWorker {
         let session_id = job.payload["session_id"]
             .as_str()
             .ok_or("missing session_id")?;
+        let project_id = job.payload
+            .get("project_id")
+            .and_then(|v| v.as_str())
+            .and_then(|s| uuid::Uuid::parse_str(s).ok());
 
-        let provider = create_consolidation_provider(
+        // Create repos
+        let events_repo = EventsRepository::new(self.pool.clone());
+        let obs_repo = ObservationsRepository::new(self.pool.clone());
+        let evidence_repo = EvidenceRepository::new(self.pool.clone());
+        let embeddings_repo = EmbeddingsRepository::new(self.pool.clone());
+        let conflicts_repo = ConflictsRepository::new(self.pool.clone());
+        let audit_repo = AuditRepository::new(self.pool.clone());
+
+        // Load session events
+        let events = events_repo
+            .list_by_session(session_id, 200)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        // Load existing observations for conflict detection
+        let existing = obs_repo
+            .list_active_with_entities(project_id)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        // Create consolidation provider
+        let provider = create_consolidation_provider(&self.provider_type, &self.provider_config)
+            .map_err(|e| e.to_string())?;
+
+        let input = memory_core::ConsolidationInput {
+            session_id: session_id.to_string(),
+            project_id,
+            events: events.clone(),
+            existing_observations: existing.clone(),
+            user_instructions: None,
+        };
+
+        let candidates = provider
+            .consolidate(input)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if candidates.is_empty() {
+            info!(session_id, "No consolidation candidates generated");
+            return Ok(());
+        }
+
+        let embedding_provider = create_embedding_provider(
             "mock",
             &ProviderConfig {
                 api_key: None,
                 model: "mock".into(),
                 base_url: None,
-                dimensions: None,
+                dimensions: Some(1536),
             },
         )
         .map_err(|e| e.to_string())?;
 
-        let input = memory_core::ConsolidationInput {
-            session_id: session_id.to_string(),
-            project_id: None,
-            events: vec![],
-            existing_observations: vec![],
-            user_instructions: None,
-        };
+        for candidate in &candidates {
+            let mut obs = memory_core::Observation::new(
+                candidate.scope,
+                session_id.to_string(),
+                candidate.kind,
+                candidate.summary.clone(),
+                candidate.confidence,
+                candidate.sensitivity,
+            )
+            .map_err(|e| e.to_string())?;
+            obs.project_id = project_id;
+            obs.entities = candidate.entities.clone();
+            obs.files = candidate.files.clone();
+            obs.commands = candidate.commands.clone();
 
-        let _candidates = provider
-            .consolidate(input)
+            let conflicts = memory_core::detect_conflicts(&obs, &existing);
+            obs.status = if conflicts.is_empty() {
+                memory_core::MemoryStatus::Active
+            } else {
+                memory_core::MemoryStatus::Conflicted
+            };
+
+            let _saved = obs_repo
+                .insert_with_links(&obs, &candidate.files, &candidate.entities, &candidate.commands, &[])
+                .await
+                .map_err(|e| e.to_string())?;
+
+            for event_id in &candidate.source_event_ids {
+                let mut evidence = memory_core::EvidenceRef::new(
+                    obs.id,
+                    memory_core::EvidenceSourceType::Message,
+                    event_id.to_string(),
+                );
+                if let Some(ref rationale) = candidate.rationale {
+                    evidence = evidence.with_excerpt(rationale.clone());
+                }
+                evidence_repo
+                    .insert(&evidence)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+
+            let embedding_vec = embedding_provider
+                .embed(&obs.summary)
+                .await
+                .map_err(|e| e.to_string())?;
+            embeddings_repo
+                .upsert_embedding(obs.id, "mock", 1536, &embedding_vec)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            for conflict in &conflicts {
+                let _ = conflicts_repo
+                    .insert_conflict(
+                        conflict.left_observation_id,
+                        conflict.right_observation_id,
+                        &conflict.conflict_type.to_string(),
+                        &conflict.description,
+                    )
+                    .await;
+            }
+        }
+
+        audit_repo
+            .insert(
+                "consolidation_worker",
+                None,
+                "consolidate_session",
+                None,
+                None,
+                Some(&serde_json::json!({
+                    "session_id": session_id,
+                    "events_loaded": events.len(),
+                    "candidates_generated": candidates.len(),
+                })),
+            )
             .await
             .map_err(|e| e.to_string())?;
+
+        info!(
+            session_id,
+            events = events.len(),
+            candidates = candidates.len(),
+            "Consolidation complete"
+        );
         Ok(())
     }
 }
 
 pub struct EmbeddingWorker {
     queue: std::sync::Arc<JobQueue>,
+    pool: PgPool,
 }
 
 impl EmbeddingWorker {
-    pub fn new(queue: std::sync::Arc<JobQueue>) -> Self {
-        Self { queue }
+    pub fn new(queue: std::sync::Arc<JobQueue>, pool: PgPool) -> Self {
+        Self { queue, pool }
     }
 
     pub async fn run(&self) {
@@ -96,6 +232,11 @@ impl EmbeddingWorker {
 
     async fn process_embedding(&self, job: &Job) -> Result<(), String> {
         let text = job.payload["text"].as_str().ok_or("missing text")?;
+        let observation_id = job.payload["observation_id"]
+            .as_str()
+            .and_then(|s| uuid::Uuid::parse_str(s).ok())
+            .ok_or("missing or invalid observation_id")?;
+
         let provider = create_embedding_provider(
             "mock",
             &ProviderConfig {
@@ -107,7 +248,19 @@ impl EmbeddingWorker {
         )
         .map_err(|e| e.to_string())?;
 
-        let _embedding = provider.embed(text).await.map_err(|e| e.to_string())?;
+        let embedding = provider.embed(text).await.map_err(|e| e.to_string())?;
+
+        let embeddings_repo = EmbeddingsRepository::new(self.pool.clone());
+        embeddings_repo
+            .upsert_embedding(observation_id, "mock", 1536, &embedding)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        info!(
+            observation_id = %observation_id,
+            dimensions = embedding.len(),
+            "Embedding generated and stored"
+        );
         Ok(())
     }
 }
@@ -153,15 +306,14 @@ impl CleanupEventsWorker {
         let _project_id = job.payload.get("project_id").and_then(|v| v.as_str());
         let days = self.retention_days;
 
-        sqlx::query(
-            r#"DELETE FROM session_events WHERE created_at < now() - ($1 || ' days')::interval"#,
-        )
-        .bind(days.to_string())
-        .execute(&self.pool)
-        .await
-        .map_err(|e| MemoryError::Database(e.to_string()).to_string())?;
+        let cutoff = time::OffsetDateTime::now_utc() - time::Duration::days(days as i64);
+        let events_repo = EventsRepository::new(self.pool.clone());
+        let deleted = events_repo
+            .delete_older_than(cutoff)
+            .await
+            .map_err(|e| e.to_string())?;
 
-        info!("Cleaned up session_events older than {} days", days);
+        info!("Cleaned up {} session_events older than {} days", deleted, days);
         Ok(())
     }
 }

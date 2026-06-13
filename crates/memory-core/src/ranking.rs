@@ -13,12 +13,12 @@ pub struct ScoreWeights {
 impl Default for ScoreWeights {
     fn default() -> Self {
         Self {
-            semantic: 0.40,
-            keyword: 0.25,
+            semantic: 0.45,
+            keyword: 0.30,
             confidence: 0.10,
             recency: 0.05,
             evidence: 0.05,
-            file_or_entity_match: 0.15,
+            file_or_entity_match: 0.05,
         }
     }
 }

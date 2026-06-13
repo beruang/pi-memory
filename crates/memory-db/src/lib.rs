@@ -1,6 +1,7 @@
 pub mod audit_repo;
 pub mod conflicts_repo;
 pub mod embeddings_repo;
+pub mod events_repo;
 pub mod evidence_repo;
 pub mod migrations;
 pub mod observations_repo;
@@ -11,6 +12,7 @@ pub mod supersessions_repo;
 pub use audit_repo::*;
 pub use conflicts_repo::*;
 pub use embeddings_repo::*;
+pub use events_repo::*;
 pub use evidence_repo::*;
 pub use migrations::*;
 pub use observations_repo::*;

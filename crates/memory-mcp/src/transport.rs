@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use serde_json::Value;
 use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::{error, info};
@@ -6,6 +8,7 @@ use super::schemas::*;
 use super::server::MemoryMcpServer;
 
 pub async fn run_stdio_server(server: MemoryMcpServer) -> Result<(), Box<dyn std::error::Error>> {
+    let server = Arc::new(server);
     let stdin = io::stdin();
     let reader = BufReader::new(stdin);
     let mut lines = reader.lines();
@@ -25,16 +28,43 @@ pub async fn run_stdio_server(server: MemoryMcpServer) -> Result<(), Box<dyn std
             }
         };
 
-        let response = match request.method.as_str() {
-            "initialize" => handle_initialize(&request),
-            "tools/list" => handle_tools_list(&request),
-            "tools/call" => handle_tools_call(&request, &server).await,
-            _ => make_error_response(
+        let response = if request.method == "initialize" {
+            handle_initialize(&request)
+        } else if request.method == "tools/list" {
+            handle_tools_list(&request)
+        } else if request.method == "tools/call" {
+            // Extract fields before the move into spawn
+            let req_id = request.id.clone();
+            let req_params = request.params.clone();
+            // Spawn tool call in a separate task so panics don't kill the server
+            let server = Arc::clone(&server);
+            let handle = tokio::task::spawn(async move {
+                let inner_req = JsonRpcRequest {
+                    id: req_id,
+                    params: req_params,
+                    ..JsonRpcRequest::default()
+                };
+                handle_tools_call_inner(&inner_req, &server).await
+            });
+            match handle.await {
+                Ok(resp) => resp,
+                Err(join_err) => {
+                    error!("Tool call handler panicked: {}", join_err);
+                    make_error_response(
+                        request.id.clone(),
+                        -32000,
+                        "Internal error: handler panicked",
+                        None,
+                    )
+                }
+            }
+        } else {
+            make_error_response(
                 request.id,
                 -32601,
                 &format!("Method not found: {}", request.method),
                 None,
-            ),
+            )
         };
 
         let response_json = serde_json::to_string(&response)?;
@@ -78,7 +108,10 @@ fn handle_tools_list(req: &JsonRpcRequest) -> JsonRpcResponse {
     }
 }
 
-async fn handle_tools_call(req: &JsonRpcRequest, server: &MemoryMcpServer) -> JsonRpcResponse {
+async fn handle_tools_call_inner(
+    req: &JsonRpcRequest,
+    server: &MemoryMcpServer,
+) -> JsonRpcResponse {
     let params = match &req.params {
         Some(Value::Object(p)) => p.clone(),
         _ => {
@@ -119,6 +152,10 @@ async fn handle_tools_call(req: &JsonRpcRequest, server: &MemoryMcpServer) -> Js
                     format!("Observation not found: {}", id)
                 }
                 memory_core::MemoryError::InvalidScope => "Invalid scope.".into(),
+                memory_core::MemoryError::InvalidId(msg) => msg.clone(),
+                memory_core::MemoryError::AuthorizationDenied => {
+                    "Authorization denied.".into()
+                }
                 memory_core::MemoryError::MissingEvidence => {
                     "Evidence is required for durable memory.".into()
                 }
@@ -165,7 +202,7 @@ mod tests {
         let resp = handle_initialize(&req);
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
-        assert_eq!(result["protocol_version"], "2024-11-05");
+        assert_eq!(result["protocolVersion"], "2024-11-05");
     }
 
     #[test]
@@ -178,7 +215,7 @@ mod tests {
         };
         let resp = handle_tools_list(&req);
         let tools = resp.result.unwrap()["tools"].as_array().unwrap().clone();
-        assert_eq!(tools.len(), 11);
+        assert_eq!(tools.len(), 12);
     }
 
     #[test]

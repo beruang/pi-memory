@@ -1,3 +1,4 @@
+pub mod access;
 pub mod conflict;
 pub mod consolidation;
 pub mod errors;
@@ -9,6 +10,7 @@ pub mod privacy;
 pub mod ranking;
 pub mod recall;
 
+pub use access::*;
 pub use conflict::*;
 pub use consolidation::*;
 pub use errors::*;

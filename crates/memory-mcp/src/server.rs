@@ -1,11 +1,13 @@
 use memory_core::{
-    detect_conflicts, scan_for_secrets, strip_private_blocks, valid_transition, ConflictRecord,
+    detect_conflicts, scan_for_secrets, strip_private_blocks, valid_transition,
+    AccessContext, ConflictRecord, ConsolidationInput, ConsolidationProvider,
     MemoryConfidence, MemoryError, MemoryKind, MemoryScope, MemorySensitivity, MemoryStatus,
     Observation, PrivateBlockRange,
 };
 use memory_db::{
-    AuditRepository, ConflictsRepository, EmbeddingsRepository, EvidenceRepository,
-    ObservationsRepository, SearchParams, SearchRepository, SupersessionsRepository,
+    AuditRepository, ConflictsRepository, EmbeddingsRepository, EventsRepository,
+    EvidenceRepository, ObservationsRepository, SearchParams, SearchRepository,
+    SupersessionsRepository,
 };
 use memory_providers::{create_embedding_provider, ProviderConfig};
 use uuid::Uuid;
@@ -18,6 +20,9 @@ pub struct MemoryMcpServer {
     conflicts_repo: ConflictsRepository,
     audit_repo: AuditRepository,
     supers_repo: SupersessionsRepository,
+    events_repo: EventsRepository,
+    consolidation_provider: Box<dyn ConsolidationProvider>,
+    access_context: AccessContext,
 }
 
 impl MemoryMcpServer {
@@ -30,6 +35,9 @@ impl MemoryMcpServer {
         conflicts_repo: ConflictsRepository,
         audit_repo: AuditRepository,
         supers_repo: SupersessionsRepository,
+        events_repo: EventsRepository,
+        consolidation_provider: Box<dyn ConsolidationProvider>,
+        access_context: AccessContext,
     ) -> Self {
         Self {
             obs_repo,
@@ -39,6 +47,9 @@ impl MemoryMcpServer {
             conflicts_repo,
             audit_repo,
             supers_repo,
+            events_repo,
+            consolidation_provider,
+            access_context,
         }
     }
 
@@ -55,11 +66,12 @@ impl MemoryMcpServer {
             "memory.update" => self.handle_update(params).await,
             "memory.mark_obsolete" => self.handle_mark_obsolete(params).await,
             "memory.consolidate_session" => self.handle_consolidate(params).await,
+            "memory.session_start" => self.handle_session_start(params).await,
             "memory.link_file" => self.handle_link_file(params).await,
             "memory.list_conflicts" => self.handle_list_conflicts(params).await,
             "memory.resolve_conflict" => self.handle_resolve_conflict(params).await,
             "memory.delete" => self.handle_delete(params).await,
-            _ => Err(MemoryError::InvalidScope),
+            _ => Err(MemoryError::InvalidId(format!("unknown tool: {}", tool_name))),
         }
     }
 
@@ -70,6 +82,25 @@ impl MemoryMcpServer {
         let task = params["task"].as_str().unwrap_or_default().to_string();
         let scope = params["scope"].as_str().unwrap_or("project").to_string();
         let project_id = parse_optional_uuid(&params, "project_id");
+
+        // Early return for empty task — prevents embedding provider crash
+        if task.trim().is_empty() {
+            return Ok(serde_json::json!({
+                "memories": [],
+                "token_estimate": 0,
+                "budget_exceeded": false,
+            }));
+        }
+
+        // Authorization: caller must have read access at this scope
+        let mem_scope: MemoryScope = scope.parse().unwrap_or(MemoryScope::Project);
+        self.access_context.check_read_access(
+            &mem_scope,
+            project_id,
+            None,
+            None,
+            &MemorySensitivity::Internal,
+        )?;
         let kinds: Option<Vec<String>> = params["kinds"].as_array().map(|a| {
             a.iter()
                 .filter_map(|v| v.as_str().map(String::from))
@@ -146,6 +177,21 @@ impl MemoryMcpServer {
         let query = params["query"].as_str().unwrap_or_default().to_string();
         let scope = params["scope"].as_str().unwrap_or("project").to_string();
         let project_id = parse_optional_uuid(&params, "project_id");
+
+        // Early return for empty query — prevents embedding provider crash
+        if query.trim().is_empty() {
+            return Ok(serde_json::json!({"results": []}));
+        }
+
+        // Authorization: caller must have read access at this scope
+        let mem_scope: MemoryScope = scope.parse().unwrap_or(MemoryScope::Project);
+        self.access_context.check_read_access(
+            &mem_scope,
+            project_id,
+            None,
+            None,
+            &MemorySensitivity::Internal,
+        )?;
         let kinds: Option<Vec<String>> = params["kinds"].as_array().map(|a| {
             a.iter()
                 .filter_map(|v| v.as_str().map(String::from))
@@ -203,14 +249,24 @@ impl MemoryMcpServer {
         &self,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, MemoryError> {
-        let id_str = params["id"].as_str().ok_or(MemoryError::InvalidScope)?;
-        let id = Uuid::parse_str(id_str).map_err(|_| MemoryError::InvalidScope)?;
+        let id_str = params["id"].as_str().ok_or(MemoryError::InvalidId("missing id".into()))?;
+        let id = Uuid::parse_str(id_str).map_err(|e| MemoryError::InvalidId(e.to_string()))?;
 
         let obs = self
             .obs_repo
             .get_by_id_with_links(id)
             .await?
             .ok_or(MemoryError::ObservationNotFound(id))?;
+
+        // Authorization: caller must have read access to this observation
+        self.access_context.check_read_access(
+            &obs.scope,
+            obs.project_id,
+            obs.user_id,
+            obs.organization_id,
+            &obs.sensitivity,
+        )?;
+
         let evidence = self.evidence_repo.get_by_observation_id(id).await?;
 
         Ok(serde_json::json!({
@@ -255,6 +311,19 @@ impl MemoryMcpServer {
         let confidence = confidence_str_to_confidence(confidence_str);
         let sensitivity_str = params["sensitivity"].as_str().unwrap_or("internal");
 
+        // Authorization: caller must have write access at this scope and sensitivity
+        let project_id = parse_optional_uuid(&params, "project_id");
+        let user_id = parse_optional_uuid(&params, "user_id");
+        let org_id = parse_optional_uuid(&params, "organization_id");
+        let write_sensitivity = sensitivity_str_to_sensitivity(sensitivity_str);
+        self.access_context.check_write_access(
+            &scope,
+            project_id,
+            user_id,
+            org_id,
+            &write_sensitivity,
+        )?;
+
         // Step 1: Strip private blocks
         let (clean_summary, redacted_ranges): (String, Vec<PrivateBlockRange>) =
             strip_private_blocks(&raw_summary);
@@ -266,7 +335,7 @@ impl MemoryMcpServer {
         }
 
         // Step 3: Classify sensitivity (upgrade to Private if private blocks were stripped)
-        let mut sensitivity = sensitivity_str_to_sensitivity(sensitivity_str);
+        let mut sensitivity = write_sensitivity;
         if sensitivity != MemorySensitivity::Secret && had_private_blocks {
             sensitivity = MemorySensitivity::Private;
         }
@@ -422,8 +491,31 @@ impl MemoryMcpServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, MemoryError> {
         let actor = params["actor"].as_str().unwrap_or("agent");
-        let id_str = params["id"].as_str().ok_or(MemoryError::InvalidScope)?;
-        let id = Uuid::parse_str(id_str).map_err(|_| MemoryError::InvalidScope)?;
+        let id_str = params["id"].as_str().ok_or(MemoryError::InvalidId("missing id".into()))?;
+        let id = Uuid::parse_str(id_str).map_err(|e| MemoryError::InvalidId(e.to_string()))?;
+
+        // Validate ALL input fields BEFORE database lookup
+        let new_summary = params["summary"].as_str().map(|s| s.to_string());
+        let new_confidence = match params["confidence"].as_str() {
+            Some(s) => Some(validate_confidence(s)?),
+            None => None,
+        };
+        let new_status = match params["status"].as_str() {
+            Some(s) => Some(validate_status(s)?),
+            None => None,
+        };
+        let new_sensitivity = params["sensitivity"]
+            .as_str()
+            .map(sensitivity_str_to_sensitivity);
+
+        // Reject empty update
+        if new_summary.is_none()
+            && new_confidence.is_none()
+            && new_status.is_none()
+            && new_sensitivity.is_none()
+        {
+            return Err(MemoryError::InvalidId("no fields to update".into()));
+        }
 
         let mut obs = self
             .obs_repo
@@ -431,28 +523,36 @@ impl MemoryMcpServer {
             .await?
             .ok_or(MemoryError::ObservationNotFound(id))?;
 
+        // Authorization: caller must have read access to this observation
+        self.access_context.check_read_access(
+            &obs.scope,
+            obs.project_id,
+            obs.user_id,
+            obs.organization_id,
+            &obs.sensitivity,
+        )?;
+
         let old_summary = obs.summary.clone();
         let mut content_changed = false;
 
-        if let Some(summary) = params["summary"].as_str() {
-            obs.summary = summary.to_string();
+        if let Some(summary) = new_summary {
+            obs.summary = summary;
             content_changed = true;
         }
-        if let Some(conf_str) = params["confidence"].as_str() {
-            obs.confidence = confidence_str_to_confidence(conf_str);
+        if let Some(conf) = new_confidence {
+            obs.confidence = conf;
         }
-        if let Some(status_str) = params["status"].as_str() {
-            let new_status = status_str_to_status(status_str);
-            if !valid_transition(obs.status, new_status) {
+        if let Some(status) = new_status {
+            if !valid_transition(obs.status, status) {
                 return Err(MemoryError::InvalidStatusTransition {
                     from: obs.status.to_string(),
-                    to: new_status.to_string(),
+                    to: status.to_string(),
                 });
             }
-            obs.status = new_status;
+            obs.status = status;
         }
-        if let Some(sensitivity_str) = params["sensitivity"].as_str() {
-            obs.sensitivity = sensitivity_str_to_sensitivity(sensitivity_str);
+        if let Some(sensitivity) = new_sensitivity {
+            obs.sensitivity = sensitivity;
         }
 
         let updated = self.obs_repo.update(&obs).await?;
@@ -501,8 +601,8 @@ impl MemoryMcpServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, MemoryError> {
         let actor = params["actor"].as_str().unwrap_or("agent");
-        let id_str = params["id"].as_str().ok_or(MemoryError::InvalidScope)?;
-        let id = Uuid::parse_str(id_str).map_err(|_| MemoryError::InvalidScope)?;
+        let id_str = params["id"].as_str().ok_or(MemoryError::InvalidId("missing id".into()))?;
+        let id = Uuid::parse_str(id_str).map_err(|e| MemoryError::InvalidId(e.to_string()))?;
         let reason = params["reason"].as_str().unwrap_or_default();
 
         let mut obs = self
@@ -510,6 +610,15 @@ impl MemoryMcpServer {
             .get_by_id(id)
             .await?
             .ok_or(MemoryError::ObservationNotFound(id))?;
+
+        // Authorization: caller must have read access
+        self.access_context.check_read_access(
+            &obs.scope,
+            obs.project_id,
+            obs.user_id,
+            obs.organization_id,
+            &obs.sensitivity,
+        )?;
 
         if !valid_transition(obs.status, MemoryStatus::Obsolete) {
             return Err(MemoryError::InvalidStatusTransition {
@@ -539,10 +648,267 @@ impl MemoryMcpServer {
         &self,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, MemoryError> {
-        let _session_id = params["session_id"].as_str().unwrap_or_default();
+        let session_id = params["session_id"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        let project_id = parse_optional_uuid(&params, "project_id");
+
+        // Authorization: consolidation writes observations at project scope
+        self.access_context.check_write_access(
+            &MemoryScope::Project,
+            project_id,
+            None,
+            None,
+            &MemorySensitivity::Internal,
+        )?;
+        let user_instructions = params["user_instructions"].as_str().map(String::from);
+        let limit = params["limit"].as_u64().unwrap_or(200) as i64;
+
+        // Step 1: Load session events
+        let events = self
+            .events_repo
+            .list_by_session(&session_id, limit)
+            .await?;
+
+        // Step 2: Load existing observations for conflict detection context
+        let existing = self
+            .obs_repo
+            .list_active_with_entities(project_id)
+            .await?;
+
+        // Step 3: Call consolidation provider
+        let input = ConsolidationInput {
+            session_id: session_id.clone(),
+            project_id,
+            events: events.clone(),
+            existing_observations: existing.clone(),
+            user_instructions,
+        };
+
+        let candidates = self
+            .consolidation_provider
+            .consolidate(input)
+            .await?;
+
+        // Step 4: Process each candidate observation
+        let embedding_provider = create_embedding_provider(
+            "mock",
+            &ProviderConfig {
+                api_key: None,
+                model: "mock".into(),
+                base_url: None,
+                dimensions: Some(1536),
+            },
+        )?;
+
+        let mut written = Vec::new();
+        let mut conflict_count = 0;
+
+        for candidate in &candidates {
+            // Build observation from candidate
+            let mut obs = Observation::new(
+                candidate.scope,
+                session_id.clone(),
+                candidate.kind,
+                candidate.summary.clone(),
+                candidate.confidence,
+                candidate.sensitivity,
+            )?;
+            obs.project_id = project_id;
+            obs.entities = candidate.entities.clone();
+            obs.files = candidate.files.clone();
+            obs.commands = candidate.commands.clone();
+
+            // Conflict detection
+            let conflicts = detect_conflicts(&obs, &existing);
+
+            if !conflicts.is_empty() {
+                obs.status = MemoryStatus::Conflicted;
+            } else {
+                obs.status = MemoryStatus::Active;
+            }
+
+            // Insert observation with links
+            let saved = self
+                .obs_repo
+                .insert_with_links(
+                    &obs,
+                    &candidate.files,
+                    &candidate.entities,
+                    &candidate.commands,
+                    &[],
+                )
+                .await?;
+
+            // Insert evidence from source events
+            for event_id in &candidate.source_event_ids {
+                let mut evidence = memory_core::EvidenceRef::new(
+                    obs.id,
+                    memory_core::EvidenceSourceType::Message,
+                    event_id.to_string(),
+                );
+                if let Some(ref rationale) = candidate.rationale {
+                    evidence = evidence.with_excerpt(rationale.clone());
+                }
+                self.evidence_repo.insert(&evidence).await?;
+            }
+
+            // Generate and store embedding
+            let embedding_vec = embedding_provider.embed(&obs.summary).await?;
+            self.embeddings_repo
+                .upsert_embedding(obs.id, "mock", 1536, &embedding_vec)
+                .await?;
+
+            // Write conflict records
+            for conflict in &conflicts {
+                self.conflicts_repo
+                    .insert_conflict(
+                        conflict.left_observation_id,
+                        conflict.right_observation_id,
+                        &conflict.conflict_type.to_string(),
+                        &conflict.description,
+                    )
+                    .await?;
+            }
+            conflict_count += conflicts.len();
+
+            written.push(serde_json::json!({
+                "id": saved.id.to_string(),
+                "kind": saved.kind.to_string(),
+                "summary": saved.summary,
+                "status": saved.status.to_string(),
+            }));
+        }
+
+        // Step 5: Write audit log
+        self.audit_repo
+            .insert(
+                "consolidation",
+                None,
+                "consolidate_session",
+                None,
+                None,
+                Some(&serde_json::json!({
+                    "session_id": session_id,
+                    "events_loaded": events.len(),
+                    "candidates_generated": candidates.len(),
+                    "observations_written": written.len(),
+                    "conflicts_detected": conflict_count,
+                })),
+            )
+            .await?;
+
         Ok(serde_json::json!({
-            "status": "queued",
-            "message": "Consolidation queued for background processing.",
+            "session_id": session_id,
+            "status": "completed",
+            "events_processed": events.len(),
+            "candidates_generated": candidates.len(),
+            "observations_written": written.len(),
+            "conflicts_detected": conflict_count,
+            "observations": written,
+        }))
+    }
+
+    async fn handle_session_start(
+        &self,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, MemoryError> {
+        let project_id = parse_optional_uuid(&params, "project_id");
+
+        // Authorization: session start reads project memory
+        self.access_context.check_read_access(
+            &MemoryScope::Project,
+            project_id,
+            None,
+            None,
+            &MemorySensitivity::Internal,
+        )?;
+
+        let session_id = params["session_id"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        let token_budget = params["token_budget"].as_u64().unwrap_or(1000) as usize;
+
+        let provider = create_embedding_provider(
+            "mock",
+            &ProviderConfig {
+                api_key: None,
+                model: "mock".into(),
+                base_url: None,
+                dimensions: Some(1536),
+            },
+        )?;
+
+        // Run strategic queries to cover different knowledge domains
+        let queries = vec![
+            ("architecture", "architecture design system structure"),
+            ("decision", "key decisions tradeoffs rationale"),
+            ("constraint", "constraints requirements limitations"),
+            ("preference", "preferences conventions patterns style"),
+            ("policy", "policies rules guidelines standards"),
+            ("dependency", "dependencies versions libraries packages"),
+            ("procedure", "procedures workflows processes setup"),
+        ];
+
+        let mut seen_ids = std::collections::HashSet::new();
+        let mut collected = Vec::new();
+        let chars_per_token = 4;
+        let per_query_limit = 5;
+
+        for (_domain, query) in &queries {
+            let query_embedding = provider.embed(query).await?;
+
+            let results = self
+                .search_repo
+                .hybrid_search(SearchParams {
+                    query_embedding,
+                    text_query: query.to_string(),
+                    scope: "project".into(),
+                    project_id,
+                    kinds: None,
+                    files: None,
+                    entities: None,
+                    limit: per_query_limit,
+                    min_confidence: None,
+                })
+                .await?;
+
+            for scored in results {
+                if seen_ids.insert(scored.observation.id) {
+                    let item_tokens =
+                        scored.observation.summary.len() / chars_per_token + 1;
+                    let total_tokens: usize = collected.iter().map(|m: &serde_json::Value| {
+                        m["summary"].as_str().unwrap_or("").len() / chars_per_token + 1
+                    }).sum();
+
+                    if total_tokens + item_tokens > token_budget {
+                        break;
+                    }
+
+                    collected.push(serde_json::json!({
+                        "id": scored.observation.id.to_string(),
+                        "kind": scored.observation.kind.to_string(),
+                        "summary": scored.observation.summary,
+                        "confidence": scored.observation.confidence.to_string(),
+                        "status": scored.observation.status.to_string(),
+                        "score": scored.final_score,
+                    }));
+                }
+            }
+        }
+
+        let total_tokens: usize = collected.iter().map(|m| {
+            m["summary"].as_str().unwrap_or("").len() / chars_per_token + 1
+        }).sum();
+
+        Ok(serde_json::json!({
+            "session_id": session_id,
+            "context": collected,
+            "token_estimate": total_tokens,
+            "budget_exceeded": total_tokens > token_budget,
+            "memory_count": collected.len(),
         }))
     }
 
@@ -552,18 +918,25 @@ impl MemoryMcpServer {
     ) -> Result<serde_json::Value, MemoryError> {
         let obs_id_str = params["observation_id"]
             .as_str()
-            .ok_or(MemoryError::InvalidScope)?;
-        let obs_id = Uuid::parse_str(obs_id_str).map_err(|_| MemoryError::InvalidScope)?;
+            .ok_or(MemoryError::InvalidId("missing observation_id".into()))?;
+        let obs_id = Uuid::parse_str(obs_id_str).map_err(|e| MemoryError::InvalidId(e.to_string()))?;
         let file_path = params["file_path"]
             .as_str()
             .ok_or(MemoryError::InvalidScope)?;
 
-        // Verify observation exists
-        let _ = self
+        // Verify observation exists and check authorization
+        let obs = self
             .obs_repo
             .get_by_id(obs_id)
             .await?
             .ok_or(MemoryError::ObservationNotFound(obs_id))?;
+        self.access_context.check_read_access(
+            &obs.scope,
+            obs.project_id,
+            obs.user_id,
+            obs.organization_id,
+            &obs.sensitivity,
+        )?;
 
         // Insert file link
         self.obs_repo.link_file(obs_id, file_path).await?;
@@ -576,6 +949,15 @@ impl MemoryMcpServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, MemoryError> {
         let project_id = parse_optional_uuid(&params, "project_id");
+
+        // Authorization: must have read access to this project's conflicts
+        self.access_context.check_read_access(
+            &MemoryScope::Project,
+            project_id,
+            None,
+            None,
+            &MemorySensitivity::Internal,
+        )?;
         let conflicts = self.conflicts_repo.list_open_conflicts(project_id).await?;
 
         Ok(serde_json::json!({
@@ -595,19 +977,41 @@ impl MemoryMcpServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, MemoryError> {
         let actor = params["actor"].as_str().unwrap_or("agent");
+        let project_id = parse_optional_uuid(&params, "project_id");
+
+        // Validate resolution BEFORE database lookup
+        let resolution = params["resolution"].as_str().unwrap_or("left_wins");
+        match resolution {
+            "left_wins" | "right_wins" | "merge" => {}
+            _ => {
+                return Err(MemoryError::InvalidId(format!(
+                    "invalid resolution strategy: {}",
+                    resolution
+                )))
+            }
+        }
+
+        // Authorization: resolving conflicts is a write operation
+        self.access_context.check_write_access(
+            &MemoryScope::Project,
+            project_id,
+            None,
+            None,
+            &MemorySensitivity::Internal,
+        )?;
+
         let conflict_id_str = params["conflict_id"]
             .as_str()
-            .ok_or(MemoryError::InvalidScope)?;
+            .ok_or(MemoryError::InvalidId("missing conflict_id".into()))?;
         let conflict_id =
-            Uuid::parse_str(conflict_id_str).map_err(|_| MemoryError::InvalidScope)?;
-        let resolution = params["resolution"].as_str().unwrap_or("left_wins");
+            Uuid::parse_str(conflict_id_str).map_err(|e| MemoryError::InvalidId(e.to_string()))?;
 
         // Find the conflict record
         let conflicts = self.conflicts_repo.list_open_conflicts(None).await?;
         let conflict = conflicts
             .iter()
             .find(|c| c.id == conflict_id)
-            .ok_or(MemoryError::InvalidScope)?;
+            .ok_or(MemoryError::InvalidId(format!("conflict not found: {}", conflict_id)))?;
 
         let left_id = conflict.left_observation_id;
         let right_id = conflict.right_observation_id;
@@ -642,7 +1046,7 @@ impl MemoryMcpServer {
             "merge" => {
                 // Both remain active, just mark conflict resolved
             }
-            _ => {}
+            _ => unreachable!(), // validated above
         }
 
         self.conflicts_repo
@@ -671,15 +1075,39 @@ impl MemoryMcpServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, MemoryError> {
         let actor = params["actor"].as_str().unwrap_or("agent");
-        let id_str = params["id"].as_str().ok_or(MemoryError::InvalidScope)?;
-        let id = Uuid::parse_str(id_str).map_err(|_| MemoryError::InvalidScope)?;
+        let id_str = params["id"].as_str().ok_or(MemoryError::InvalidId("missing id".into()))?;
+        let id = Uuid::parse_str(id_str).map_err(|e| MemoryError::InvalidId(e.to_string()))?;
         let reason = params["reason"].as_str().unwrap_or_default();
+        let permanent = params["permanent"].as_bool().unwrap_or(false);
 
+        // Authorization: load observation and check read access before any deletion
         let obs = self
             .obs_repo
             .get_by_id(id)
             .await?
             .ok_or(MemoryError::ObservationNotFound(id))?;
+        self.access_context.check_read_access(
+            &obs.scope,
+            obs.project_id,
+            obs.user_id,
+            obs.organization_id,
+            &obs.sensitivity,
+        )?;
+
+        if permanent {
+            self.obs_repo.hard_delete(id).await?;
+            self.audit_repo
+                .insert(
+                    actor,
+                    None,
+                    "hard_delete",
+                    Some(id),
+                    None,
+                    Some(&serde_json::json!({"reason": reason})),
+                )
+                .await?;
+            return Ok(serde_json::json!({"id": id.to_string(), "status": "permanently_deleted"}));
+        }
 
         if !valid_transition(obs.status, MemoryStatus::Deleted) {
             return Err(MemoryError::InvalidStatusTransition {
@@ -694,7 +1122,7 @@ impl MemoryMcpServer {
             .insert(
                 actor,
                 None,
-                "delete",
+                "soft_delete",
                 Some(id),
                 Some(&serde_json::json!({"status": obs.status.to_string()})),
                 Some(&serde_json::json!({"reason": reason})),
@@ -707,6 +1135,33 @@ impl MemoryMcpServer {
 
 fn parse_optional_uuid(params: &serde_json::Value, key: &str) -> Option<Uuid> {
     params[key].as_str().and_then(|s| Uuid::parse_str(s).ok())
+}
+
+fn validate_confidence(s: &str) -> Result<MemoryConfidence, MemoryError> {
+    match s {
+        "high" => Ok(MemoryConfidence::High),
+        "medium" => Ok(MemoryConfidence::Medium),
+        "low" => Ok(MemoryConfidence::Low),
+        _ => Err(MemoryError::InvalidId(format!(
+            "invalid confidence value: {}",
+            s
+        ))),
+    }
+}
+
+fn validate_status(s: &str) -> Result<MemoryStatus, MemoryError> {
+    match s {
+        "active" => Ok(MemoryStatus::Active),
+        "unconfirmed" => Ok(MemoryStatus::Unconfirmed),
+        "superseded" => Ok(MemoryStatus::Superseded),
+        "obsolete" => Ok(MemoryStatus::Obsolete),
+        "conflicted" => Ok(MemoryStatus::Conflicted),
+        "deleted" => Ok(MemoryStatus::Deleted),
+        _ => Err(MemoryError::InvalidId(format!(
+            "invalid status value: {}",
+            s
+        ))),
+    }
 }
 
 fn kind_str_to_kind(s: &str) -> MemoryKind {
@@ -746,18 +1201,6 @@ fn sensitivity_str_to_sensitivity(s: &str) -> MemorySensitivity {
         "private" => MemorySensitivity::Private,
         "secret" => MemorySensitivity::Secret,
         _ => MemorySensitivity::Internal,
-    }
-}
-
-fn status_str_to_status(s: &str) -> MemoryStatus {
-    match s {
-        "active" => MemoryStatus::Active,
-        "unconfirmed" => MemoryStatus::Unconfirmed,
-        "superseded" => MemoryStatus::Superseded,
-        "obsolete" => MemoryStatus::Obsolete,
-        "conflicted" => MemoryStatus::Conflicted,
-        "deleted" => MemoryStatus::Deleted,
-        _ => MemoryStatus::Active,
     }
 }
 

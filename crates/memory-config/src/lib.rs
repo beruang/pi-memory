@@ -7,6 +7,8 @@ use std::path::Path;
 pub struct AppConfig {
     pub database_url: String,
     #[serde(default)]
+    pub project_id: Option<uuid::Uuid>,
+    #[serde(default)]
     pub default_scope: String,
     #[serde(default = "default_event_retention_days")]
     pub event_retention_days: u32,
@@ -101,6 +103,7 @@ impl Default for AppConfig {
         Self {
             database_url: std::env::var("DATABASE_URL")
                 .unwrap_or_else(|_| "postgres://localhost:5432/agent_memory".into()),
+            project_id: None,
             default_scope: "project".to_string(),
             event_retention_days: default_event_retention_days(),
             max_recall_tokens: default_max_recall_tokens(),

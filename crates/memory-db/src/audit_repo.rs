@@ -44,11 +44,11 @@ impl AuditRepository {
         .bind(actor_id)
         .bind(action)
         .bind(observation_id)
-        .bind(before.and_then(|v| serde_json::to_string(v).ok()))
-        .bind(after.and_then(|v| serde_json::to_string(v).ok()))
+        .bind(before.cloned())
+        .bind(after.cloned())
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        ?;
 
         Ok(row_to_audit(&row))
     }
@@ -67,7 +67,7 @@ impl AuditRepository {
         .bind(observation_id)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        ?;
 
         Ok(rows.iter().map(row_to_audit).collect())
     }
@@ -88,23 +88,23 @@ impl AuditRepository {
         .bind(offset)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        ?;
 
         Ok(rows.iter().map(row_to_audit).collect())
     }
 }
 
 fn row_to_audit(row: &sqlx::postgres::PgRow) -> AuditRecord {
-    let before_str: Option<String> = row.get("before");
-    let after_str: Option<String> = row.get("after");
+    let before: Option<serde_json::Value> = row.get("before");
+    let after: Option<serde_json::Value> = row.get("after");
     AuditRecord {
         id: row.get("id"),
         actor_type: row.get("actor_type"),
         actor_id: row.get("actor_id"),
         action: row.get("action"),
         observation_id: row.get("observation_id"),
-        before: before_str.and_then(|s| serde_json::from_str(&s).ok()),
-        after: after_str.and_then(|s| serde_json::from_str(&s).ok()),
+        before,
+        after,
         created_at: row.get("created_at"),
     }
 }

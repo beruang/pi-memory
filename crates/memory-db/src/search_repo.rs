@@ -55,7 +55,7 @@ impl SearchRepository {
                     AND o.scope::text = $2
                     AND ($3::uuid IS NULL OR o.project_id = $3)
                     AND o.sensitivity NOT IN ('secret', 'private')
-                    AND ($4::text[] IS NULL OR o.kind = ANY($4::text[]))
+                    AND ($4::text[] IS NULL OR o.kind::text = ANY($4::text[]))
                 ORDER BY e.embedding <=> $1::vector
                 LIMIT 100
             ),
@@ -69,7 +69,7 @@ impl SearchRepository {
                     AND o.scope::text = $2
                     AND ($3::uuid IS NULL OR o.project_id = $3)
                     AND o.sensitivity NOT IN ('secret', 'private')
-                    AND ($4::text[] IS NULL OR o.kind = ANY($4::text[]))
+                    AND ($4::text[] IS NULL OR o.kind::text = ANY($4::text[]))
                     AND o.search_tsv @@ plainto_tsquery('english', $5)
                 ORDER BY text_score DESC
                 LIMIT 100
@@ -93,7 +93,7 @@ impl SearchRepository {
                     o.status,
                     o.created_at,
                     COALESCE(vm.vector_score, 0.0) AS vector_score,
-                    COALESCE(tm.text_score, 0.0) AS text_score,
+                    COALESCE(tm.text_score, 0.0::float8) AS text_score,
                     CASE o.confidence::text
                         WHEN 'high' THEN 1.0
                         WHEN 'medium' THEN 0.7
@@ -121,14 +121,18 @@ impl SearchRepository {
                     CASE
                         WHEN fm.observation_id IS NOT NULL OR em.observation_id IS NOT NULL THEN 1.0
                         ELSE 0.0
-                    END AS file_or_entity_match_score
+                    END AS file_or_entity_match_score,
+                    LEAST(1.0, COALESCE(
+                        (SELECT COUNT(*)::float / 5.0 FROM evidence e WHERE e.observation_id = o.id),
+                        0.0
+                    )) AS evidence_score
                 FROM observations o
                 LEFT JOIN vector_matches vm ON vm.id = o.id
                 LEFT JOIN text_matches tm ON tm.id = o.id
                 LEFT JOIN file_match fm ON fm.observation_id = o.id
                 LEFT JOIN entity_match em ON em.observation_id = o.id
                 WHERE (vm.id IS NOT NULL OR tm.id IS NOT NULL)
-                  AND ($4::text[] IS NULL OR o.kind = ANY($4::text[]))
+                  AND ($4::text[] IS NULL OR o.kind::text = ANY($4::text[]))
                   AND (
                       $8::text IS NULL
                       OR (o.confidence::text = 'high' AND $8::text = 'high')
@@ -139,11 +143,12 @@ impl SearchRepository {
             SELECT
                 *,
                 LEAST(1.0, GREATEST(0.0,
-                    COALESCE(vector_score, 0.0) * 0.40
-                    + COALESCE(text_score, 0.0) * 0.25
+                    COALESCE(vector_score, 0.0) * 0.45
+                    + COALESCE(text_score, 0.0) * 0.30
                     + confidence_score * 0.10
                     + recency_score * 0.05
-                    + file_or_entity_match_score * 0.15
+                    + evidence_score * 0.05
+                    + file_or_entity_match_score * 0.05
                     - CASE status
                         WHEN 'conflicted' THEN 0.15
                         WHEN 'obsolete' THEN 0.10
@@ -167,42 +172,46 @@ impl SearchRepository {
         .bind(params.limit)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        ?;
 
-        Ok(rows.iter().map(row_to_scored_observation).collect())
+        let mut results = Vec::with_capacity(rows.len());
+        for row in &rows {
+            results.push(row_to_scored_observation(row)?);
+        }
+        Ok(results)
     }
 }
 
-fn row_to_scored_observation(row: &sqlx::postgres::PgRow) -> ScoredObservation {
-    ScoredObservation {
+fn row_to_scored_observation(row: &sqlx::postgres::PgRow) -> Result<ScoredObservation, MemoryError> {
+    Ok(ScoredObservation {
         observation: Observation {
-            id: row.get("id"),
-            scope: row.get("scope"),
-            project_id: row.get("project_id"),
-            user_id: row.get("user_id"),
-            organization_id: row.get("organization_id"),
-            session_id: row.get("session_id"),
-            kind: row.get("kind"),
-            summary: row.get("summary"),
+            id: row.try_get("id")?,
+            scope: row.try_get("scope")?,
+            project_id: row.try_get("project_id")?,
+            user_id: row.try_get("user_id")?,
+            organization_id: row.try_get("organization_id")?,
+            session_id: row.try_get("session_id")?,
+            kind: row.try_get("kind")?,
+            summary: row.try_get("summary")?,
             entities: vec![],
             files: vec![],
             commands: vec![],
             links: vec![],
-            confidence: row.get("confidence"),
-            sensitivity: row.get("sensitivity"),
-            status: row.get("status"),
+            confidence: row.try_get("confidence")?,
+            sensitivity: row.try_get("sensitivity")?,
+            status: row.try_get("status")?,
             evidence: vec![],
-            created_at: row.get("created_at"),
-            updated_at: row.get("updated_at"),
-            last_accessed_at: row.get("last_accessed_at"),
-            last_confirmed_at: row.get("last_confirmed_at"),
-            valid_until: row.get("valid_until"),
+            created_at: row.try_get("created_at")?,
+            updated_at: row.try_get("updated_at")?,
+            last_accessed_at: row.try_get("last_accessed_at")?,
+            last_confirmed_at: row.try_get("last_confirmed_at")?,
+            valid_until: row.try_get("valid_until")?,
             supersedes: vec![],
-            superseded_by: row.get("superseded_by"),
-            metadata: row.get("metadata"),
+            superseded_by: row.try_get("superseded_by")?,
+            metadata: row.try_get("metadata")?,
         },
-        final_score: row.get::<Option<f64>, _>("final_score").unwrap_or(0.0),
-        vector_score: row.get::<Option<f64>, _>("vector_score").unwrap_or(0.0),
-        text_score: row.get::<Option<f64>, _>("text_score").unwrap_or(0.0),
-    }
+        final_score: row.try_get::<Option<f64>, _>("final_score")?.unwrap_or(0.0),
+        vector_score: row.try_get::<Option<f64>, _>("vector_score")?.unwrap_or(0.0),
+        text_score: row.try_get::<Option<f64>, _>("text_score")?.unwrap_or(0.0),
+    })
 }

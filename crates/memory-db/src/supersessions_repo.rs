@@ -31,7 +31,7 @@ impl SupersessionsRepository {
         .bind(reason)
         .execute(&self.pool)
         .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        ?;
 
         Ok(())
     }
@@ -50,7 +50,7 @@ impl SupersessionsRepository {
         .bind(observation_id)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        ?;
 
         Ok(rows.iter().map(|r| r.get("older_observation_id")).collect())
     }
@@ -66,7 +66,7 @@ impl SupersessionsRepository {
         .bind(observation_id)
         .execute(&self.pool)
         .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        ?;
 
         Ok(())
     }

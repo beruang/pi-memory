@@ -58,6 +58,8 @@ enum Commands {
     Ui {
         #[arg(long, default_value = "3000")]
         port: u16,
+        #[arg(long)]
+        config: Option<String>,
     },
 }
 
@@ -101,8 +103,8 @@ async fn main() {
         Commands::Inspect { observation_id } => {
             commands::inspect(observation_id).await;
         }
-        Commands::Ui { port } => {
-            commands::ui(port).await;
+        Commands::Ui { port, config } => {
+            commands::ui(port, config).await;
         }
     }
 }

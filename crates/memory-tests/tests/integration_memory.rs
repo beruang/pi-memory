@@ -163,3 +163,83 @@ async fn test_provider_mock_roundtrip() {
     let candidates = con_provider.consolidate(input).await.unwrap();
     assert!(candidates.is_empty()); // No events = no candidates
 }
+
+#[tokio::test]
+async fn test_consolidation_with_events() {
+    let con_config = ProviderConfig {
+        api_key: None,
+        model: "mock".into(),
+        base_url: None,
+        dimensions: None,
+    };
+    let con_provider = create_consolidation_provider("mock", &con_config).unwrap();
+    let event = SessionEvent::new(
+        "s1".into(),
+        "user_prompt".into(),
+        serde_json::json!({"text": "The team decided to use PostgreSQL advisory locks for job deduplication because Redis locks expired too early during long-running jobs."}),
+    );
+    let input = ConsolidationInput {
+        session_id: "s1".into(),
+        project_id: None,
+        events: vec![event],
+        existing_observations: vec![],
+        user_instructions: None,
+    };
+    let candidates = con_provider.consolidate(input).await.unwrap();
+    assert!(!candidates.is_empty(), "Provider should produce candidates from session events");
+
+    // Verify candidate structure
+    let candidate = &candidates[0];
+    assert_eq!(candidate.scope, MemoryScope::Project);
+    assert_eq!(candidate.kind, MemoryKind::Fact);
+    assert_eq!(candidate.source_event_ids.len(), 1);
+}
+
+#[test]
+fn test_token_budget_session_start() {
+    let budget = TokenBudget::default();
+    assert_eq!(budget.session_start, 1000);
+    assert!(budget.session_start < budget.task_recall);
+    assert!(budget.session_start > budget.preference_recall);
+}
+
+#[tokio::test]
+async fn test_hard_delete_status_transition() {
+    // Verify that deleted status is valid transition from any active status
+    let obs = Observation::new(
+        MemoryScope::Project,
+        "s1".into(),
+        MemoryKind::Fact,
+        "test".into(),
+        MemoryConfidence::Low,
+        MemorySensitivity::Internal,
+    )
+    .unwrap();
+    assert!(valid_transition(obs.status, MemoryStatus::Deleted));
+}
+
+#[tokio::test]
+async fn test_session_start_empty_project() {
+    // Verify the SessionEvent creation and mark_redacted used in session events
+    let mut event = SessionEvent::new(
+        "s-start".into(),
+        "session_start".into(),
+        serde_json::json!({"project_id": "00000000-0000-0000-0000-000000000000"}),
+    );
+    assert!(!event.redacted);
+
+    event.mark_redacted();
+    assert!(event.redacted);
+    assert_eq!(event.session_id, "s-start");
+}
+
+#[test]
+fn test_tool_definitions_include_session_start() {
+    let tools = memory_mcp::schemas::all_tool_definitions();
+    let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+    assert!(
+        names.contains(&"memory.session_start"),
+        "memory.session_start must be defined"
+    );
+    assert_eq!(tools.len(), 12);
+}

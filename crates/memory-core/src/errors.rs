@@ -8,6 +8,9 @@ pub enum MemoryError {
     #[error("invalid memory scope")]
     InvalidScope,
 
+    #[error("invalid id: {0}")]
+    InvalidId(String),
+
     #[error("secret content cannot be persisted")]
     SecretContentRejected,
 
@@ -26,8 +29,15 @@ pub enum MemoryError {
     #[error("consolidation provider error: {0}")]
     ConsolidationProvider(String),
 
-    #[error("database error: {0}")]
-    Database(String),
+    #[cfg_attr(feature = "db", error("{0}"))]
+    #[cfg_attr(not(feature = "db"), error("database error: {0}"))]
+    Database(
+        #[cfg(feature = "db")]
+        #[from]
+        sqlx::Error,
+        #[cfg(not(feature = "db"))]
+        String,
+    ),
 
     #[error("authorization denied")]
     AuthorizationDenied,

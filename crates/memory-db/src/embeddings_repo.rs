@@ -33,7 +33,7 @@ impl EmbeddingsRepository {
         .bind(embedding)
         .execute(&self.pool)
         .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        ?;
 
         Ok(())
     }
@@ -70,7 +70,7 @@ impl EmbeddingsRepository {
         .bind(limit)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        ?;
 
         Ok(rows
             .iter()
@@ -87,7 +87,7 @@ impl EmbeddingsRepository {
             .bind(observation_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| MemoryError::Database(e.to_string()))?;
+            ?;
 
         Ok(())
     }

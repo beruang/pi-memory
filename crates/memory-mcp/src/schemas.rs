@@ -3,7 +3,7 @@ use serde_json::Value;
 
 // --- MCP JSON-RPC types ---
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct JsonRpcRequest {
     pub jsonrpc: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -35,6 +35,7 @@ pub struct JsonRpcError {
 // --- MCP Initialize ---
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InitializeResult {
     pub protocol_version: String,
     pub capabilities: ServerCapabilities,
@@ -42,16 +43,19 @@ pub struct InitializeResult {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ServerCapabilities {
     pub tools: ToolCapability,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ToolCapability {
     pub list_changed: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ServerInfo {
     pub name: String,
     pub version: String,
@@ -60,6 +64,7 @@ pub struct ServerInfo {
 // --- Tool Definitions ---
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ToolDefinition {
     pub name: String,
     pub description: String,
@@ -206,13 +211,27 @@ pub fn all_tool_definitions() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
+            name: "memory.session_start".into(),
+            description: "Recall relevant project context at session start. Automatically fetches architecture, decisions, preferences, policies and constraints within token budget.".into(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "string", "format": "uuid"},
+                    "session_id": {"type": "string", "description": "Current session ID"},
+                    "token_budget": {"type": "integer", "default": 1000}
+                },
+                "required": ["project_id", "session_id"]
+            }),
+        },
+        ToolDefinition {
             name: "memory.delete".into(),
-            description: "Soft-delete a memory with a reason.".into(),
+            description: "Delete a memory observation.".into(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "id": {"type": "string", "format": "uuid"},
-                    "reason": {"type": "string"}
+                    "reason": {"type": "string", "description": "Reason for deletion"},
+                    "permanent": {"type": "boolean", "description": "When true, permanently remove from database instead of soft-delete", "default": false}
                 },
                 "required": ["id", "reason"]
             }),

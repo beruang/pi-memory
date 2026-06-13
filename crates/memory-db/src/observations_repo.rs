@@ -44,8 +44,7 @@ impl ObservationsRepository {
         .bind(obs.created_at)
         .bind(obs.updated_at)
         .fetch_one(&self.pool)
-        .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        .await?;
 
         Ok(row_to_observation(&row))
     }
@@ -55,7 +54,7 @@ impl ObservationsRepository {
             .bind(id)
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| MemoryError::Database(e.to_string()))?;
+            ?;
 
         Ok(row.as_ref().map(row_to_observation))
     }
@@ -83,7 +82,7 @@ impl ObservationsRepository {
         .bind(&obs.metadata)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?
+        ?
         .ok_or(MemoryError::ObservationNotFound(obs.id))?;
 
         Ok(row_to_observation(&row))
@@ -112,7 +111,7 @@ impl ObservationsRepository {
         .bind(offset)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        ?;
 
         Ok(rows.iter().map(row_to_observation).collect())
     }
@@ -124,11 +123,56 @@ impl ObservationsRepository {
         .bind(id)
         .execute(&self.pool)
         .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        ?;
 
         if result.rows_affected() == 0 {
             return Err(MemoryError::ObservationNotFound(id));
         }
+        Ok(())
+    }
+
+    /// Permanently remove an observation and all its linked data.
+    pub async fn hard_delete(&self, id: Uuid) -> Result<(), MemoryError> {
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query(r#"DELETE FROM evidence WHERE observation_id = $1"#)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(r#"DELETE FROM observation_embeddings WHERE observation_id = $1"#)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(r#"DELETE FROM observation_files WHERE observation_id = $1"#)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(r#"DELETE FROM observation_entities WHERE observation_id = $1"#)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(r#"DELETE FROM observation_commands WHERE observation_id = $1"#)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            r#"DELETE FROM observation_supersessions WHERE newer_observation_id = $1 OR older_observation_id = $1"#,
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            r#"DELETE FROM observation_conflicts WHERE left_observation_id = $1 OR right_observation_id = $1"#,
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(r#"DELETE FROM observations WHERE id = $1"#)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
         Ok(())
     }
 
@@ -145,7 +189,7 @@ impl ObservationsRepository {
             .pool
             .begin()
             .await
-            .map_err(|e| MemoryError::Database(e.to_string()))?;
+            ?;
 
         // Insert observation
         sqlx::query(
@@ -179,7 +223,7 @@ impl ObservationsRepository {
         .bind(obs.updated_at)
         .execute(&mut *tx)
         .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        ?;
 
         // Insert file links
         for file in files {
@@ -190,7 +234,7 @@ impl ObservationsRepository {
             .bind(file)
             .execute(&mut *tx)
             .await
-            .map_err(|e| MemoryError::Database(e.to_string()))?;
+            ?;
         }
 
         // Insert entity links
@@ -202,7 +246,7 @@ impl ObservationsRepository {
             .bind(entity)
             .execute(&mut *tx)
             .await
-            .map_err(|e| MemoryError::Database(e.to_string()))?;
+            ?;
         }
 
         // Insert command links
@@ -214,7 +258,7 @@ impl ObservationsRepository {
             .bind(cmd)
             .execute(&mut *tx)
             .await
-            .map_err(|e| MemoryError::Database(e.to_string()))?;
+            ?;
         }
 
         // Insert supersession links
@@ -230,12 +274,12 @@ impl ObservationsRepository {
             .bind(older_id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| MemoryError::Database(e.to_string()))?;
+            ?;
         }
 
         tx.commit()
             .await
-            .map_err(|e| MemoryError::Database(e.to_string()))?;
+            ?;
         Ok(obs.clone())
     }
 
@@ -245,7 +289,7 @@ impl ObservationsRepository {
             .bind(id)
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| MemoryError::Database(e.to_string()))?;
+            ?;
 
         let Some(row) = row else { return Ok(None) };
 
@@ -255,7 +299,7 @@ impl ObservationsRepository {
         .bind(id)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        ?;
 
         let entities: Vec<String> = sqlx::query_scalar(
             r#"SELECT entity FROM observation_entities WHERE observation_id = $1"#,
@@ -263,7 +307,7 @@ impl ObservationsRepository {
         .bind(id)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        ?;
 
         let commands: Vec<String> = sqlx::query_scalar(
             r#"SELECT command FROM observation_commands WHERE observation_id = $1"#,
@@ -271,7 +315,7 @@ impl ObservationsRepository {
         .bind(id)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        ?;
 
         let supersedes: Vec<Uuid> = sqlx::query_scalar(
             r#"SELECT older_observation_id FROM observation_supersessions WHERE newer_observation_id = $1"#,
@@ -279,7 +323,7 @@ impl ObservationsRepository {
         .bind(id)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        ?;
 
         Ok(Some(row_to_observation_with_links(
             &row, files, entities, commands, supersedes,
@@ -298,7 +342,7 @@ impl ObservationsRepository {
         .bind(file_path)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        ?;
 
         if ids.is_empty() {
             return Ok(vec![]);
@@ -309,7 +353,7 @@ impl ObservationsRepository {
                 .bind(&ids)
                 .fetch_all(&self.pool)
                 .await
-                .map_err(|e| MemoryError::Database(e.to_string()))?;
+                ?;
 
         // Populate links for each row
         let mut observations = Vec::new();
@@ -321,28 +365,28 @@ impl ObservationsRepository {
             .bind(id)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| MemoryError::Database(e.to_string()))?;
+            ?;
             let entities: Vec<String> = sqlx::query_scalar(
                 r#"SELECT entity FROM observation_entities WHERE observation_id = $1"#,
             )
             .bind(id)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| MemoryError::Database(e.to_string()))?;
+            ?;
             let commands: Vec<String> = sqlx::query_scalar(
                 r#"SELECT command FROM observation_commands WHERE observation_id = $1"#,
             )
             .bind(id)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| MemoryError::Database(e.to_string()))?;
+            ?;
             let supersedes: Vec<Uuid> = sqlx::query_scalar(
                 r#"SELECT older_observation_id FROM observation_supersessions WHERE newer_observation_id = $1"#,
             )
             .bind(id)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| MemoryError::Database(e.to_string()))?;
+            ?;
             observations.push(row_to_observation_with_links(
                 row, files, entities, commands, supersedes,
             ));
@@ -363,7 +407,7 @@ impl ObservationsRepository {
         .bind(entity)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        ?;
 
         if ids.is_empty() {
             return Ok(vec![]);
@@ -374,7 +418,7 @@ impl ObservationsRepository {
                 .bind(&ids)
                 .fetch_all(&self.pool)
                 .await
-                .map_err(|e| MemoryError::Database(e.to_string()))?;
+                ?;
 
         let mut observations = Vec::new();
         for row in &rows {
@@ -385,28 +429,28 @@ impl ObservationsRepository {
             .bind(id)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| MemoryError::Database(e.to_string()))?;
+            ?;
             let entities: Vec<String> = sqlx::query_scalar(
                 r#"SELECT entity FROM observation_entities WHERE observation_id = $1"#,
             )
             .bind(id)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| MemoryError::Database(e.to_string()))?;
+            ?;
             let commands: Vec<String> = sqlx::query_scalar(
                 r#"SELECT command FROM observation_commands WHERE observation_id = $1"#,
             )
             .bind(id)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| MemoryError::Database(e.to_string()))?;
+            ?;
             let supersedes: Vec<Uuid> = sqlx::query_scalar(
                 r#"SELECT older_observation_id FROM observation_supersessions WHERE newer_observation_id = $1"#,
             )
             .bind(id)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| MemoryError::Database(e.to_string()))?;
+            ?;
             observations.push(row_to_observation_with_links(
                 row, files, entities, commands, supersedes,
             ));
@@ -432,7 +476,7 @@ impl ObservationsRepository {
         .bind(project_id)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        ?;
 
         let mut observations = Vec::new();
         for row in &rows {
@@ -443,28 +487,28 @@ impl ObservationsRepository {
             .bind(id)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| MemoryError::Database(e.to_string()))?;
+            ?;
             let entities: Vec<String> = sqlx::query_scalar(
                 r#"SELECT entity FROM observation_entities WHERE observation_id = $1"#,
             )
             .bind(id)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| MemoryError::Database(e.to_string()))?;
+            ?;
             let commands: Vec<String> = sqlx::query_scalar(
                 r#"SELECT command FROM observation_commands WHERE observation_id = $1"#,
             )
             .bind(id)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| MemoryError::Database(e.to_string()))?;
+            ?;
             let supersedes: Vec<Uuid> = sqlx::query_scalar(
                 r#"SELECT older_observation_id FROM observation_supersessions WHERE newer_observation_id = $1"#,
             )
             .bind(id)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| MemoryError::Database(e.to_string()))?;
+            ?;
             observations.push(row_to_observation_with_links(
                 row, files, entities, commands, supersedes,
             ));
@@ -485,7 +529,7 @@ impl ObservationsRepository {
         .bind(file_path)
         .execute(&self.pool)
         .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        ?;
         Ok(())
     }
 }

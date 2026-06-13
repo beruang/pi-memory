@@ -44,7 +44,7 @@ impl ConflictsRepository {
         .bind(description)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        ?;
 
         Ok(row_to_conflict(&row))
     }
@@ -65,7 +65,7 @@ impl ConflictsRepository {
             .bind(pid)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| MemoryError::Database(e.to_string()))?
+            ?
         } else {
             sqlx::query(
                 r#"
@@ -76,7 +76,7 @@ impl ConflictsRepository {
             )
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| MemoryError::Database(e.to_string()))?
+            ?
         };
 
         Ok(rows.iter().map(row_to_conflict).collect())
@@ -98,7 +98,7 @@ impl ConflictsRepository {
         .bind(status)
         .execute(&self.pool)
         .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        ?;
 
         Ok(())
     }

@@ -1,9 +1,9 @@
 use memory_mcp::schemas::*;
 
 #[test]
-fn test_all_11_tools_defined() {
+fn test_all_tools_defined() {
     let tools = all_tool_definitions();
-    assert_eq!(tools.len(), 11);
+    assert_eq!(tools.len(), 12);
 
     let tool_names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
     assert!(tool_names.contains(&"memory.recall"));
@@ -13,6 +13,7 @@ fn test_all_11_tools_defined() {
     assert!(tool_names.contains(&"memory.update"));
     assert!(tool_names.contains(&"memory.mark_obsolete"));
     assert!(tool_names.contains(&"memory.consolidate_session"));
+    assert!(tool_names.contains(&"memory.session_start"));
     assert!(tool_names.contains(&"memory.link_file"));
     assert!(tool_names.contains(&"memory.list_conflicts"));
     assert!(tool_names.contains(&"memory.resolve_conflict"));
@@ -54,9 +55,9 @@ fn test_initialize_result_shape() {
     };
 
     let json = serde_json::to_value(&result).unwrap();
-    assert_eq!(json["protocol_version"], "2024-11-05");
-    assert_eq!(json["server_info"]["name"], "agent-memory");
-    assert!(json["capabilities"]["tools"]["list_changed"]
+    assert_eq!(json["protocolVersion"], "2024-11-05");
+    assert_eq!(json["serverInfo"]["name"], "agent-memory");
+    assert!(json["capabilities"]["tools"]["listChanged"]
         .as_bool()
         .unwrap());
 }

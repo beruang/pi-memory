@@ -28,7 +28,7 @@ impl EvidenceRepository {
         .bind(evidence.created_at)
         .execute(&self.pool)
         .await
-        .map_err(|e| MemoryError::Database(e.to_string()))?;
+        ?;
 
         Ok(evidence.clone())
     }
@@ -42,7 +42,7 @@ impl EvidenceRepository {
                 .bind(observation_id)
                 .fetch_all(&self.pool)
                 .await
-                .map_err(|e| MemoryError::Database(e.to_string()))?;
+                ?;
 
         Ok(rows.iter().map(row_to_evidence).collect())
     }
@@ -52,7 +52,7 @@ impl EvidenceRepository {
             .bind(observation_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| MemoryError::Database(e.to_string()))?;
+            ?;
 
         Ok(())
     }
